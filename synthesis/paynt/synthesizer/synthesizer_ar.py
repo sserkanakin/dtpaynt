@@ -3,8 +3,6 @@ import paynt.synthesizer.synthesizer
 import paynt.quotient.pomdp
 import paynt.verification.property_result
 
-# import heapq
-
 import logging
 logger = logging.getLogger(__name__)
 
@@ -117,41 +115,6 @@ class SynthesizerAR(paynt.synthesizer.synthesizer.Synthesizer):
         if isinstance(self.quotient, paynt.quotient.pomdp.PomdpQuotient):
             self.stat.new_fsc_found(family.analysis_result.improving_value, ia, self.quotient.policy_size(ia))
 
-    # Priority-based 'synthesize_one' method using heapq
-    # def synthesize_one(self, family):
-    #     # 1. Initialize with a starting priority.
-    #     # We use a list that will be managed by heapq.
-    #     families = [(-1.0, family)]  # (priority, item)
-    #     heapq.heapify(families)
-
-    #     while families:
-    #         if self.resource_limit_reached():
-    #             break
-
-    #         # 2. Pop the item with the highest priority (lowest number).
-    #         priority, family = heapq.heappop(families)
-
-    #         self.verify_family(family)
-    #         self.update_optimum(family)
-    #         if not self.quotient.specification.has_optimality and self.best_assignment is not None:
-    #             break
-
-    #         if family.analysis_result.can_improve is False:
-    #             self.explore(family)
-    #             continue
-
-    #         # 3. Get subfamilies AND their scores from the modified split method.
-    #         # We will modify self.quotient.split in the next step.
-    #         scored_subfamilies = self.quotient.split(family)
-
-    #         # 4. Push the new subfamilies onto the priority queue with their scores.
-    #         for score, sub_family in scored_subfamilies:
-    #             # We use negative score because heapq is a min-heap.
-    #             heapq.heappush(families, (-score, sub_family))
-
-    #     return self.best_assignment
-
-    # Original 'synthesize_one' method
     def synthesize_one(self, family):
         families = [family]
         while families:
