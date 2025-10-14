@@ -1,8 +1,14 @@
 # Dockerfile for DTPAYNT development
-# ARG defines a build-time variable with a default value
-ARG SRC_FOLDER=synthesis 
+## Note: On multi-arch hosts (Apple Silicon / M1/M2) Docker may pull an
+## image for a different platform (linux/amd64) than the host (linux/arm64).
+## If you need to force a platform at build time, pass --platform (examples
+## below in the README or build instructions).
 
 FROM randriu/paynt:cav25
+
+# ARG defines a build-time variable with a default value. It must be
+# declared after the final FROM to be available to later instructions like COPY.
+ARG SRC_FOLDER=synthesis
 
 # Copy the specified source folder and reinstall it
 COPY ./${SRC_FOLDER} /opt/paynt
