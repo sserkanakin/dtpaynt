@@ -1002,7 +1002,62 @@ class MdpQuotient(paynt.quotient.quotient.Quotient):
         # force the score of the selected splitter
         return {splitter:10}
 
+    # # updated version
+    # def split(self, family):
 
+    #     mdp = family.mdp
+    #     assert not mdp.is_deterministic
+
+    #     # split family wrt last undecided result
+    #     result = family.analysis_result.undecided_result()
+    #     hole_assignments = result.primary_selection
+    #     scores = self.scheduler_scores(mdp, result.prop, result.primary.result, result.primary_selection)
+
+    #     splitters = self.holes_with_max_score(scores)
+    #     splitter = splitters[0]
+
+
+    #     # get the score of the variable we are splitting on
+    #     splitter_score = scores[splitter]
+
+    #     if self.is_action_hole[splitter] or self.is_decision_hole[splitter]:
+    #         assert len(hole_assignments[splitter]) > 1
+    #         core_suboptions,other_suboptions = self.suboptions_enumerate(mdp, splitter, hole_assignments[splitter])
+    #     else:
+    #         subfamily_options = family.hole_options(splitter)
+
+    #         # split in half
+    #         index_split = len(subfamily_options)//2
+
+    #         # split by inconsistent options
+    #         option_1 = hole_assignments[splitter][0]; index_1 = subfamily_options.index(option_1)
+    #         option_2 = hole_assignments[splitter][1]; index_2 = subfamily_options.index(option_2)
+    #         index_split = index_2
+
+    #         core_suboptions = [subfamily_options[:index_split], subfamily_options[index_split:]]
+
+    #         for options in core_suboptions: assert len(options) > 0
+    #         other_suboptions = []
+
+    #     if len(other_suboptions) == 0:
+    #         suboptions = core_suboptions
+    #     else:
+    #         suboptions = [other_suboptions] + core_suboptions  # DFS solves core first
+
+    #     # construct corresponding subfamilies
+    #     parent_info = family.collect_parent_info(self.specification)
+    #     parent_info.analysis_result = family.analysis_result
+    #     parent_info.scheduler_choices = family.scheduler_choices
+    #     # parent_info.unsat_core_hint = self.coloring.unsat_core.copy()
+    #     subfamilies = family.split(splitter,suboptions)
+    #     assert family.size == sum([family.size for family in subfamilies])
+    #     for subfamily in subfamilies:
+    #         subfamily.add_parent_info(parent_info)
+
+    #     scored_subfamilies = [(splitter_score, sub_fam) for sub_fam in subfamilies]
+    #     return scored_subfamilies
+
+    # Original 'split' method
     def split(self, family):
 
         mdp = family.mdp
@@ -1015,11 +1070,6 @@ class MdpQuotient(paynt.quotient.quotient.Quotient):
 
         splitters = self.holes_with_max_score(scores)
         splitter = splitters[0]
-
-
-        # get the score of the variable we are splitting on
-        splitter_score = scores[splitter]
-
         if self.is_action_hole[splitter] or self.is_decision_hole[splitter]:
             assert len(hole_assignments[splitter]) > 1
             core_suboptions,other_suboptions = self.suboptions_enumerate(mdp, splitter, hole_assignments[splitter])
@@ -1053,7 +1103,5 @@ class MdpQuotient(paynt.quotient.quotient.Quotient):
         assert family.size == sum([family.size for family in subfamilies])
         for subfamily in subfamilies:
             subfamily.add_parent_info(parent_info)
-
-        scored_subfamilies = [(splitter_score, sub_fam) for sub_fam in subfamilies]
-        return scored_subfamilies
+        return subfamilies
     
