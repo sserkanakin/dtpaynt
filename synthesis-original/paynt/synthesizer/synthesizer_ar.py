@@ -117,10 +117,17 @@ class SynthesizerAR(paynt.synthesizer.synthesizer.Synthesizer):
 
     def synthesize_one(self, family):
         families = [family]
+
+        iteration_count = 0
+
         while families:
             if self.resource_limit_reached():
                 break
             family = families.pop(-1)
+
+            print(f"[Depth-First] Iteration {iteration_count}, Processing family: {family}")
+            iteration_count += 1
+            
             self.verify_family(family)
             self.update_optimum(family)
             if not self.quotient.specification.has_optimality and self.best_assignment is not None:
