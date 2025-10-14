@@ -3,6 +3,7 @@ import paynt.synthesizer.synthesizer
 import paynt.quotient.pomdp
 import paynt.verification.property_result
 import heapq  # <-- Import heapq for the priority queue
+import itertools
 import logging
 logger = logging.getLogger(__name__)
 
@@ -115,8 +116,11 @@ class SynthesizerAR(paynt.synthesizer.synthesizer.Synthesizer):
             self.stat.new_fsc_found(family.analysis_result.improving_value, ia, self.quotient.policy_size(ia))
 
     def synthesize_one(self, family):
-        # 1. Initialize with a starting priority.
-        families = [(-1.0, family)]  # (priority, item)
+        # 1. Initialize with a starting priority. Use a counter as tie-breaker
+        # because Family objects are not orderable; heapq will try to compare
+        # the next tuple element when priorities tie which raises TypeError.
+        counter = itertools.count()
+        families = [(-1.0, next(counter), family)]  # (priority, tie-breaker, item)
         heapq.heapify(families)
 
         iteration_count = 0
@@ -126,7 +130,7 @@ class SynthesizerAR(paynt.synthesizer.synthesizer.Synthesizer):
                 break
 
             # 2. Pop the item with the highest priority (lowest number).
-            priority, family = heapq.heappop(families)
+            priority, _, family = heapq.heappop(families)
 
             print(f"[Best-First] Iteration {iteration_count}: Popping family with priority {-priority:.4f}. Family: {family}")
             iteration_count += 1
@@ -145,7 +149,8 @@ class SynthesizerAR(paynt.synthesizer.synthesizer.Synthesizer):
 
             # 4. Push the new subfamilies onto the priority queue with their scores.
             for score, sub_family in scored_subfamilies:
-                # We use negative score because heapq is a min-heap.
-                heapq.heappush(families, (-score, sub_family))
+                # We use negative score because heapq is a min-heap. Include
+                # the counter as a tie-breaker to avoid comparing Family.
+                heapq.heappush(families, (-score, next(counter), sub_family))
 
         return self.best_assignment
