@@ -97,26 +97,43 @@ docker run -v="$(pwd)/results_modified":/opt/cav25-experiments/results -it dtpay
 
 If both scripts finish with **"Smoke test passed\!"**, your setup is successful. ✅
 
-### Running with Gurobi (Optional)
+### Running on a Subset of Models (Recommended for a Deeper Test)
+Since the full benchmark suite takes a very long time, a good alternative is to run on a significant subset of 13 models using the `--model-subset` flag. This will provide meaningful results in a more reasonable amount of time.
 
-To run tests with full comparison against the OMDT tool, you need a `gurobi.lic` file. Make sure to use the correct image name (`dtpaynt-original` or `dtpaynt-dev`) for the version you want to test.
+#### A. Run the Original Version (Subset):
+
+Bash
 
 ```bash
-# Example for the modified version
+docker run -v="$(pwd)/results_original_subset":/opt/cav25-experiments/results -it dtpaynt-original ./experiments.sh --skip-omdt --model-subset
+```
+#### B. Run the Modified Version (Subset):
+
+Bash
+
+```bash
+docker run -v="$(pwd)/results_modified_subset":/opt/cav25-experiments/results -it dtpaynt-dev ./experiments.sh --skip-omdt --model-subset
+```
+
+#### Running with Gurobi (Optional)
+To run tests with full comparison against the OMDT tool, you need a gurobi.lic file. Make sure to use the correct image name (dtpaynt-original or dtpaynt-dev) for the version you want to test.
+
+Bash
+
+```bash
+# Example for the modified version on the smoke test
 docker run -v=/absolute/path/to/your/gurobi.lic:/opt/gurobi/gurobi.lic:ro -v="$(pwd)/results_modified":/opt/cav25-experiments/results -it dtpaynt-dev ./experiments.sh --smoke-test
 ```
 
------
+## 4. Accessing Results and Debugging
+Results: All generated logs, .csv files, and figures will appear in the respective results folders (e.g., results_original, results_modified_subset) on your local machine.
 
-## 4\. Accessing Results and Debugging
+Interactive Shell: If you need to debug or explore a container's file system, use the appropriate image name:
 
-  * **Results**: All generated logs, `.csv` files, and figures will appear in the respective `results_original` or `results_modified` folders on your local machine.
+Bash
 
-  * **Interactive Shell**: If you need to debug or explore a container's file system, use the appropriate image name:
-
-    ```bash
-    # To explore the modified version's container
-    docker run -it dtpaynt-dev bash
-    ```
-
-    Once inside, you can navigate the file system using standard Linux commands. Type `exit` to leave the container.
+### To explore the modified version's container
+```bash
+docker run -it dtpaynt-dev bash
+```
+Once inside, you can navigate the file system using standard Linux commands. Type `exit` to leave the container.
