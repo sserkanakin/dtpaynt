@@ -4,6 +4,7 @@ import paynt.quotient.pomdp
 import paynt.verification.property_result
 import heapq  # <-- Import heapq for the priority queue
 import itertools
+import math
 import logging
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,27 @@ class SynthesizerAR(paynt.synthesizer.synthesizer.Synthesizer):
         spec_result.evaluate(family, admissible_assignment)
         family.analysis_result = spec_result
 
+        # ---------- Bounds and priority updates ----------
+        # We interpret primary optimality value as:
+        # - Maximizing: an admissible upper bound U(F) on achievable concrete value
+        # - Minimizing: an admissible lower bound LB(F) on achievable concrete value (we still store it in upper_bound)
+        # L(F) is best known concrete value within this family (if we found a consistent improving assignment)
+        if self.quotient.specification.has_optimality:
+            opt_res = family.analysis_result.optimality_result
+            if opt_res is not None and opt_res.primary is not None:
+                family.upper_bound = opt_res.primary.value
+            # improving value is a concrete assignment value within F
+            if family.analysis_result.improving_value is not None:
+                lv = family.analysis_result.improving_value
+                if family.lower_bound is None:
+                    family.lower_bound = lv
+                else:
+                    # For maximizing: take max; for minimizing: take min
+                    if self.quotient.specification.optimality.minimizing:
+                        family.lower_bound = min(family.lower_bound, lv)
+                    else:
+                        family.lower_bound = max(family.lower_bound, lv)
+
     def verify_family(self, family):
         self.quotient.build(family)
 
@@ -116,41 +138,126 @@ class SynthesizerAR(paynt.synthesizer.synthesizer.Synthesizer):
             self.stat.new_fsc_found(family.analysis_result.improving_value, ia, self.quotient.policy_size(ia))
 
     def synthesize_one(self, family):
-        # 1. Initialize with a starting priority. Use a counter as tie-breaker
-        # because Family objects are not orderable; heapq will try to compare
-        # the next tuple element when priorities tie which raises TypeError.
+        # Best-first search with bound-gap priority, safe pruning, and simple dominance filtering.
         counter = itertools.count()
-        families = [(-1.0, next(counter), family)]  # (priority, tie-breaker, item)
-        heapq.heapify(families)
+
+        # Internal helpers
+        def family_signature(fam):
+            return tuple(tuple(fam.hole_options(h)) for h in range(fam.num_holes))
+
+        def compute_priority(fam, v_best, maximizing):
+            # Explore eagerly if we lack critical bounds
+            if fam.upper_bound is None:
+                return float('inf')
+            if maximizing:
+                if fam.lower_bound is None:
+                    return float('inf')
+                return max(0.0, fam.upper_bound - fam.lower_bound)
+            else:
+                # For minimizing, fam.upper_bound stores a lower bound LB(F)
+                if v_best is None or math.isinf(v_best):
+                    return float('inf')
+                return max(0.0, v_best - fam.upper_bound)
+
+        def should_prune(fam, v_best, maximizing):
+            if v_best is None:
+                return False
+            if fam.upper_bound is None:
+                return False
+            if maximizing:
+                return fam.upper_bound <= v_best
+            else:
+                # fam.upper_bound is LB for minimizing
+                return fam.upper_bound >= v_best
+
+        # Initialize
+        maximizing = True
+        if self.quotient.specification.has_optimality:
+            maximizing = self.quotient.specification.optimality.maximizing
+
+        # Initial verification to populate bounds on the root
+        self.verify_family(family)
+        self.update_optimum(family)
+
+        v_best = self.best_assignment_value
+        if v_best is None:
+            v_best = -math.inf if maximizing else math.inf
+
+        # Priority queue stores (-priority, upper_bound for tie, -depth, counter, family)
+        pq = []
+        sig_seen = set()
+        pruned_by_bound = 0
+        dropped_by_dominance = 0
+        pq_pushes = 0
+        pq_pops = 0
+
+        def push_if_useful(fam):
+            nonlocal pq_pushes, dropped_by_dominance
+            sig = family_signature(fam)
+            if sig in sig_seen:
+                return
+            # Dominance filter: if fam ⊆ any queued family, drop fam
+            for _, _, _, _, qfam in pq:
+                if fam.subset_of(qfam):
+                    dropped_by_dominance += 1
+                    return
+            # Compute priority and push
+            pr = compute_priority(fam, self.best_assignment_value, maximizing)
+            fam.priority = pr
+            ub_tie = fam.upper_bound if fam.upper_bound is not None else (math.inf if maximizing else math.inf)
+            depth_tie = fam.refinement_depth if hasattr(fam, 'refinement_depth') else 0
+            heapq.heappush(pq, (-pr, ub_tie, -depth_tie, next(counter), fam))
+            pq_pushes += 1
+            sig_seen.add(sig)
+
+        # Push root if not pruned
+        if not should_prune(family, self.best_assignment_value, maximizing):
+            push_if_useful(family)
+        else:
+            pruned_by_bound += 1
 
         iteration_count = 0
-
-        while families:
+        while pq:
             if self.resource_limit_reached():
                 break
+            _, _, _, _, fam = heapq.heappop(pq)
+            pq_pops += 1
 
-            # 2. Pop the item with the highest priority (lowest number).
-            priority, _, family = heapq.heappop(families)
-
-            print(f"[Best-First] Iteration {iteration_count}: Popping family with priority {-priority:.4f}. Family: {family}")
+            print(f"[Best-First] Iteration {iteration_count}: priority={fam.priority}, depth={fam.refinement_depth}, family={fam}")
             iteration_count += 1
 
-            self.verify_family(family)
-            self.update_optimum(family)
+            # If undecided, split and process children
+            if fam.analysis_result is None:
+                self.verify_family(fam)
+            self.update_optimum(fam)
             if not self.quotient.specification.has_optimality and self.best_assignment is not None:
                 break
 
-            if family.analysis_result.can_improve is False:
-                self.explore(family)
+            # Safety prune now that bounds may be updated
+            if should_prune(fam, self.best_assignment_value, maximizing):
+                pruned_by_bound += 1
                 continue
 
-            # 3. Get subfamilies AND their scores from the modified split method.
-            scored_subfamilies = self.quotient.split(family)
+            if fam.analysis_result.can_improve is False:
+                self.explore(fam)
+                continue
 
-            # 4. Push the new subfamilies onto the priority queue with their scores.
-            for score, sub_family in scored_subfamilies:
-                # We use negative score because heapq is a min-heap. Include
-                # the counter as a tie-breaker to avoid comparing Family.
-                heapq.heappush(families, (-score, next(counter), sub_family))
+            # undecided => split and verify/push each child
+            split_result = self.quotient.split(fam)
+            # Support both [(score, fam), ...] and [fam, ...]
+            if len(split_result) > 0 and isinstance(split_result[0], tuple):
+                scored = split_result
+            else:
+                scored = [(None, sf) for sf in split_result]
+            for _, subfam in scored:
+                # Build and analyze to get bounds
+                self.verify_family(subfam)
+                self.update_optimum(subfam)
+                if should_prune(subfam, self.best_assignment_value, maximizing):
+                    pruned_by_bound += 1
+                    continue
+                push_if_useful(subfam)
 
+        # Log basic stats
+        logger.info(f"best-first exploration: pops={pq_pops}, pushes={pq_pushes}, pruned_by_bound={pruned_by_bound}, dominance_dropped={dropped_by_dominance}")
         return self.best_assignment

@@ -45,6 +45,11 @@ class Family:
         self.analysis_result = None
         self.encoding = None
 
+        # Bounds for priority-queue exploration
+        self.upper_bound = None  # admissible upper bound U(F) on best achievable value within this family
+        self.lower_bound = None  # best known concrete value L(F) within this family
+        self.priority = None     # cached priority (gap), computed by the synthesizer
+
     def add_parent_info(self, parent_info):
         self.parent_info = parent_info
         self.refinement_depth = parent_info.refinement_depth + 1
@@ -104,7 +109,19 @@ class Family:
         return ", ".join(hole_strings)
 
     def copy(self):
-        return Family(self)
+        # Create a shallow structural copy; bounds will be recomputed for the copy
+        new_family = Family(self)
+        new_family.upper_bound = None
+        new_family.lower_bound = None
+        new_family.priority = None
+        new_family.parent_info = None
+        new_family.refinement_depth = 0
+        new_family.constraint_indices = None
+        new_family.selected_choices = None
+        new_family.mdp = None
+        new_family.analysis_result = None
+        new_family.encoding = None
+        return new_family
 
     def assume_hole_options_copy(self, hole, options):
         '''
@@ -164,3 +181,17 @@ class Family:
     def encode(self, smt_solver):
         if self.encoding is None:
             self.encoding = paynt.family.smt.FamilyEncoding(smt_solver, self)
+
+    # ---------- Additional helpers for priority-queue exploration ----------
+
+    def subset_of(self, other: "Family") -> bool:
+        """Return True iff for every hole, our option set is a subset of the other's options.
+        This is used for dominance filtering in the priority queue.
+        """
+        for hole in range(self.num_holes):
+            my_opts = set(self.hole_options(hole))
+            other_opts = set(other.hole_options(hole))
+            if not my_opts.issubset(other_opts):
+                return False
+        return True
+
