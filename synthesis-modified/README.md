@@ -50,6 +50,27 @@ docker run --rm -it randriu/paynt
 python3 paynt.py --help
 ```
 
+## Hybrid Symbiotic Synthesis
+
+The repository now bundles a hybrid orchestration script that first delegates to dtcontrol and then refines the resulting tree with PAYNT heuristics:
+
+```shell
+python3 hybrid_synthesis.py PROJECT \
+    --prism model.prism \
+    --prop model.props \
+    --max-subtree-depth 3 \
+    --max-loss 0.05
+```
+
+Key options:
+
+- `--initial-dot PATH` – reuse a previously generated dtcontrol DOT file instead of invoking dtcontrol.
+- `--max-subtree-depth / --min-subtree-depth` – bound the subtrees considered for optimisation (heuristic selection happens closer to the root first).
+- `--max-loss` – cap the tolerated behavioural deviation between the original and refined sub-tree (loss is expressed as the fraction of affected decision paths).
+- `--[no-]hybrid` – toggle the PAYNT refinement stage while keeping dtcontrol integration in place.
+
+The script expects `pydot` to be available for DOT parsing and reuses the existing project configuration files that PAYNT consumes. By default the optimised tree is written to `hybrid_tree.dot`; pass `--output` to customise the location.
+
 
 ## Running PAYNT
 

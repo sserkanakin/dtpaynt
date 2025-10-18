@@ -1,3 +1,5 @@
+from typing import List
+
 import paynt.quotient.posmg
 import paynt.synthesizer.synthesizer
 import paynt.quotient.pomdp
@@ -8,9 +10,30 @@ logger = logging.getLogger(__name__)
 
 class SynthesizerAR(paynt.synthesizer.synthesizer.Synthesizer):
 
+    def __init__(self, quotient, path_condition: List = None):
+        super().__init__(quotient)
+        self.path_condition = path_condition or []
+
     @property
     def method_name(self):
         return "AR"
+
+    def set_path_condition(self, path_condition: List):
+        self.path_condition = path_condition or []
+
+    def optimize_subtree(self, subproblem, template, max_loss: float):
+        """
+        Optimize a sub-tree using heuristic pruning respecting the supplied template.
+        Returns a tuple (optimized_tree, loss, improved).
+        """
+        from paynt.utils import tree_slicer
+
+        candidate = tree_slicer.optimise_subproblem_structure(subproblem, template)
+        loss = tree_slicer.estimate_policy_loss(subproblem.subtree, candidate)
+        improved = len(candidate.collect_nonterminals()) < subproblem.original_nonterminal_count
+        if loss > max_loss or not improved:
+            return subproblem.subtree, loss, False
+        return candidate, loss, True
 
     def check_specification(self, family):
         ''' Check specification for mdp or smg based on self.quotient '''

@@ -1,0 +1,7 @@
+digraph Tree {
+    0 [label="s <= 0"];
+    1 [label="up"];
+    2 [label="down"];
+    0 -> 1 [label="True"];
+    0 -> 2 [label="False"];
+}
