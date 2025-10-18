@@ -1,0 +1,25 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.0, pytest-8.4.2, pluggy-1.6.0 -- /Users/serkan/Projects/FML/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/serkan/Projects/FML/dtpaynt/synthesis-modified
+configfile: pytest.ini
+collecting ... collected 16 items
+
+tests/test_hybrid_components.py::TestDotParser::test_parse_dot_basic PASSED [  6%]
+tests/test_hybrid_components.py::TestDotParser::test_build_tree_structure PASSED [ 12%]
+tests/test_hybrid_components.py::TestDotParser::test_parse_empty_dot PASSED [ 18%]
+tests/test_hybrid_components.py::TestDecisionExtraction::test_extract_decision_test_basic PASSED [ 25%]
+tests/test_hybrid_components.py::TestDecisionExtraction::test_extract_decision_test_complex PASSED [ 31%]
+tests/test_hybrid_components.py::TestDecisionExtraction::test_extract_action_basic PASSED [ 37%]
+tests/test_hybrid_components.py::TestDecisionExtraction::test_extract_action_alternative_format PASSED [ 43%]
+tests/test_hybrid_components.py::TestDecisionExtraction::test_extract_action_from_simple_label PASSED [ 50%]
+tests/test_hybrid_components.py::TestPathCondition::test_path_condition_creation PASSED [ 56%]
+tests/test_hybrid_components.py::TestPathCondition::test_path_condition_string PASSED [ 62%]
+tests/test_hybrid_components.py::TestPathCondition::test_empty_path_condition PASSED [ 68%]
+tests/test_hybrid_components.py::TestTreeSlicer::test_tree_statistics PASSED [ 75%]
+tests/test_hybrid_components.py::TestSubProblem::test_subproblem_creation PASSED [ 81%]
+tests/test_hybrid_components.py::TestSubProblem::test_subproblem_repr PASSED [ 87%]
+tests/test_hybrid_integration_standalone.py::TestDotParserIntegration::test_dot_to_tree_pipeline PASSED [ 93%]
+tests/test_hybrid_integration_standalone.py::TestPathConditionIntegration::test_path_condition_formatting PASSED [100%]
+
+============================== 16 passed in 0.01s ==============================

@@ -7,10 +7,32 @@ import logging
 logger = logging.getLogger(__name__)
 
 class SynthesizerAR(paynt.synthesizer.synthesizer.Synthesizer):
+    
+    def __init__(self, quotient, path_condition=None):
+        """
+        Initialize the synthesizer with optional path constraints.
+        
+        Args:
+            quotient: The quotient object for synthesis
+            path_condition: Optional list of path constraints for constrained synthesis
+                           Each constraint is a dict with 'variable', 'operator', 'value'
+        """
+        super().__init__(quotient)
+        self.path_condition = path_condition or []
+        logger.debug(f"Initialized SynthesizerAR with {len(self.path_condition)} path constraints")
 
     @property
     def method_name(self):
         return "AR"
+    
+    def get_path_condition(self):
+        """Get the path condition constraints for this synthesizer."""
+        return self.path_condition
+    
+    def set_path_condition(self, path_condition):
+        """Set the path condition constraints for this synthesizer."""
+        self.path_condition = path_condition or []
+        logger.debug(f"Set path condition with {len(self.path_condition)} constraints")
 
     def check_specification(self, family):
         ''' Check specification for mdp or smg based on self.quotient '''
