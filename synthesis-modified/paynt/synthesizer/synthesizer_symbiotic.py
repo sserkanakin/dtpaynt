@@ -93,6 +93,7 @@ class SynthesizerSymbiotic(paynt.synthesizer.synthesizer.Synthesizer):
         self.final_value = None
         self.dtcontrol_calls = 0
         self.dtcontrol_successes = 0
+        self.is_basic_mdp = False
     
     @property
     def method_name(self):
@@ -107,17 +108,20 @@ class SynthesizerSymbiotic(paynt.synthesizer.synthesizer.Synthesizer):
                    f"timeout={self.symbiotic_timeout}")
         
         # Check if this is an MDP with holes (MdpFamilyQuotient)
-        # If not, fall back to decision tree synthesis
+        # For basic MDPs, we still use symbiotic but with dtcontrol as the primary synthesizer
         import paynt.quotient.mdp_family
         import paynt.quotient.mdp
         
-        if isinstance(self.quotient, paynt.quotient.mdp.MdpQuotient) and \
-           not isinstance(self.quotient, paynt.quotient.mdp_family.MdpFamilyQuotient):
-            logger.info("Quotient is basic MDP (not a family), falling back to decision tree synthesis")
-            # Use decision tree synthesis instead
-            from paynt.synthesizer.decision_tree import SynthesizerDecisionTree
-            dt_synthesizer = SynthesizerDecisionTree(self.quotient)
-            return dt_synthesizer.run(optimum_threshold)
+        is_basic_mdp = isinstance(self.quotient, paynt.quotient.mdp.MdpQuotient) and \
+                       not isinstance(self.quotient, paynt.quotient.mdp_family.MdpFamilyQuotient)
+        
+        if is_basic_mdp:
+            logger.info("Quotient is basic MDP (not a family)")
+            logger.info("Using dtcontrol for tree generation instead of AR synthesis")
+            # For basic MDPs, use dtcontrol directly without AR synthesis
+            self.is_basic_mdp = True
+        else:
+            self.is_basic_mdp = False
         
         try:
             # Step 1: Generate initial tree using dtcontrol
@@ -230,44 +234,61 @@ class SynthesizerSymbiotic(paynt.synthesizer.synthesizer.Synthesizer):
             return None
     
     def _compute_optimal_policy(self):
-        """Compute optimal policy for the MDP using AR synthesis first."""
+        """Compute optimal policy for the MDP using AR synthesis (families) or model checking (basic MDPs)."""
         try:
-            # For MDPs with families, run AR synthesis first to get an assignment
-            # Then compute policy from that assignment
-            from paynt.synthesizer.synthesizer_ar import SynthesizerAR
-            
-            logger.info("Running AR synthesis to get optimal assignment...")
-            ar_synthesizer = SynthesizerAR(self.quotient)
-            ar_result = ar_synthesizer.run()
-            
-            if ar_result is None or ar_synthesizer.best_assignment is None:
-                logger.warning("AR synthesis failed or produced no assignment")
+            if self.is_basic_mdp:
+                # For basic MDPs (no holes), directly model check to get optimal policy
+                logger.info("Model checking basic MDP to get optimal policy...")
+                
+                # The quotient itself is the MDP, model check it directly
+                mdp = self.quotient.mdp
+                result = mdp.check_specification(self.quotient.specification)
+                
+                if hasattr(result, 'scheduler') and result.scheduler is not None:
+                    logger.info(f"Successfully extracted scheduler with value {result.optimality_result.value}")
+                    return result.scheduler
+                elif hasattr(result, 'policy') and result.policy is not None:
+                    logger.info(f"Successfully extracted policy with value {result.optimality_result.value}")
+                    return result.policy
+                
+                logger.warning("Could not extract scheduler/policy from basic MDP result")
                 return None
-            
-            # Get the assignment
-            assignment = ar_synthesizer.best_assignment
-            logger.info(f"AR synthesis produced assignment: {assignment}")
-            
-            # Build the MDP for this assignment
-            mdp = self.quotient.build_assignment(assignment)
-            
-            if mdp is None:
-                logger.warning("Could not build MDP for assignment")
+            else:
+                # For MDPs with families, run AR synthesis first to get an assignment
+                from paynt.synthesizer.synthesizer_ar import SynthesizerAR
+                
+                logger.info("Running AR synthesis to get optimal assignment...")
+                ar_synthesizer = SynthesizerAR(self.quotient)
+                ar_result = ar_synthesizer.run()
+                
+                if ar_result is None or ar_synthesizer.best_assignment is None:
+                    logger.warning("AR synthesis failed or produced no assignment")
+                    return None
+                
+                # Get the assignment
+                assignment = ar_synthesizer.best_assignment
+                logger.info(f"AR synthesis produced assignment: {assignment}")
+                
+                # Build the MDP for this assignment
+                mdp = self.quotient.build_assignment(assignment)
+                
+                if mdp is None:
+                    logger.warning("Could not build MDP for assignment")
+                    return None
+                
+                # Check the specification to get the optimal policy
+                result = mdp.check_specification(self.quotient.specification)
+                
+                # Extract the policy scheduler  
+                if hasattr(result, 'scheduler') and result.scheduler is not None:
+                    logger.info(f"Successfully extracted scheduler with value {result.optimality_result.value}")
+                    return result.scheduler
+                elif hasattr(result, 'policy') and result.policy is not None:
+                    logger.info(f"Successfully extracted policy with value {result.optimality_result.value}")
+                    return result.policy
+                
+                logger.warning("Could not extract scheduler/policy from result")
                 return None
-            
-            # Check the specification to get the optimal policy
-            result = mdp.check_specification(self.quotient.specification)
-            
-            # Extract the policy scheduler  
-            if hasattr(result, 'scheduler') and result.scheduler is not None:
-                logger.info(f"Successfully extracted scheduler with value {result.optimality_result.value}")
-                return result.scheduler
-            elif hasattr(result, 'policy') and result.policy is not None:
-                logger.info(f"Successfully extracted policy with value {result.optimality_result.value}")
-                return result.policy
-            
-            logger.warning("Could not extract scheduler/policy from result")
-            return None
             
         except Exception as e:
             logger.error(f"Error computing optimal policy: {e}", exc_info=True)
@@ -314,35 +335,85 @@ class SynthesizerSymbiotic(paynt.synthesizer.synthesizer.Synthesizer):
             raise
     
     def _parse_dot_file(self, dot_file_path):
-        """Parse a .dot file and create an internal tree representation."""
+        """Parse dtcontrol tree JSON output and create an internal tree representation."""
         try:
             if not os.path.exists(dot_file_path):
-                logger.error(f"Dot file not found: {dot_file_path}")
+                logger.error(f"Tree file not found: {dot_file_path}")
                 return None
             
-            # Read and parse the dot file using graphviz
+            # Read the JSON file (dtcontrol outputs JSON, not DOT)
             with open(dot_file_path, 'r') as f:
-                dot_content = f.read()
+                tree_data = json.load(f)
             
-            graph = graphviz.Source(dot_content)
+            logger.info(f"Loaded decision tree from {dot_file_path}")
             
-            # For now, create a simple tree structure
-            # In a real implementation, we would parse the graph structure
-            root = DecisionTreeNode(0, is_leaf=False, predicate="s0")
-            child1 = DecisionTreeNode(1, is_leaf=False, predicate="s1")
-            child2 = DecisionTreeNode(2, is_leaf=True, action="a0")
-            child3 = DecisionTreeNode(3, is_leaf=True, action="a1")
+            # Convert JSON tree to internal representation
+            root = self._json_to_tree(tree_data)
             
-            root.children[0] = child1
-            root.children[1] = child2
-            child1.children[0] = child3
-            child1.children[1] = child2
+            if root is None:
+                logger.error("Failed to convert JSON tree to internal representation")
+                return None
             
-            logger.info("Parsed decision tree from dot file")
+            logger.info(f"Parsed decision tree: {root.num_nodes()} nodes, {root.num_leaves()} leaves")
             return root
             
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSON tree file: {e}")
+            return None
         except Exception as e:
-            logger.error(f"Error parsing dot file: {e}", exc_info=True)
+            logger.error(f"Error parsing tree file: {e}", exc_info=True)
+            return None
+    
+    def _json_to_tree(self, json_node, node_id=None):
+        """Recursively convert JSON tree to internal DecisionTreeNode representation."""
+        if node_id is None:
+            node_id = [0]  # Use list to allow modification in nested calls
+        
+        try:
+            current_id = node_id[0]
+            node_id[0] += 1
+            
+            if json_node.get("type") == "leaf":
+                # Leaf node - contains an action
+                action = json_node.get("action", json_node.get("value", "unknown"))
+                logger.debug(f"Created leaf node {current_id}: action={action}")
+                return DecisionTreeNode(current_id, is_leaf=True, action=action)
+            
+            elif json_node.get("type") == "node" or json_node.get("type") == "decision_node":
+                # Internal decision node
+                # The predicate/variable name is typically stored here
+                predicate = json_node.get("predicate", json_node.get("variable", json_node.get("label", "var")))
+                
+                node = DecisionTreeNode(current_id, is_leaf=False, predicate=predicate)
+                logger.debug(f"Created inner node {current_id}: predicate={predicate}")
+                
+                # Process children
+                children_data = json_node.get("children", [])
+                if isinstance(children_data, dict):
+                    # Children as dictionary {branch_label: child_node}
+                    for branch_label, child_json in children_data.items():
+                        child_node = self._json_to_tree(child_json, node_id)
+                        if child_node is not None:
+                            node.children[branch_label] = child_node
+                            child_node.parent = node
+                            child_node.branch_value = branch_label
+                elif isinstance(children_data, list):
+                    # Children as list
+                    for idx, child_json in enumerate(children_data):
+                        child_node = self._json_to_tree(child_json, node_id)
+                        if child_node is not None:
+                            node.children[str(idx)] = child_node
+                            child_node.parent = node
+                            child_node.branch_value = str(idx)
+                
+                return node
+            
+            else:
+                logger.warning(f"Unknown node type: {json_node.get('type')}")
+                return None
+            
+        except Exception as e:
+            logger.error(f"Error converting JSON to tree: {e}", exc_info=True)
             return None
     
     def _select_subtree(self, tree, target_depth=None):
