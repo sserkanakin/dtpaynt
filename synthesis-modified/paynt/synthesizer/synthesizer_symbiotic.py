@@ -316,8 +316,14 @@ class SynthesizerSymbiotic(paynt.synthesizer.synthesizer.Synthesizer):
                 logger.error("Could not extract scheduler from specification result")
                 raise RuntimeError("No scheduler in specification result")
             
+            # Convert stormpy scheduler to JSON format
+            logger.debug("Converting stormpy scheduler to JSON format...")
+            scheduler_json_str = scheduler.to_json_str(self.quotient.quotient_mdp, skip_dont_care_states=True)
+            scheduler_json = json.loads(scheduler_json_str)
+            logger.debug(f"Scheduler converted to JSON with {len(scheduler_json)} state decisions")
+            
             # Use the wrapper to generate tree
-            result_wrapper = self.dtcontrol.generate_tree_from_scheduler(scheduler, preset="default")
+            result_wrapper = self.dtcontrol.generate_tree_from_scheduler(scheduler_json, preset="default")
             
             if not result_wrapper.success:
                 logger.error(f"dtcontrol failed: {result_wrapper.error_msg}")
