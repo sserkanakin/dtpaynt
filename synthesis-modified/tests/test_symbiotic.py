@@ -8,6 +8,7 @@ import os
 import tempfile
 import shutil
 from pathlib import Path
+from unittest import mock
 
 import paynt.synthesizer.synthesizer_symbiotic as symbiotic
 
@@ -284,7 +285,7 @@ class TestMockIntegration:
     """Basic integration test with mocked components."""
     
     def test_mock_dtcontrol_call(self):
-        """Test mock dtcontrol call."""
+        """Test mock dtcontrol call with subprocess mocking."""
         class DummyQuotient:
             def get_property(self):
                 return None
@@ -293,15 +294,86 @@ class TestMockIntegration:
         
         with tempfile.TemporaryDirectory() as temp_dir:
             output_file = os.path.join(temp_dir, "output.dot")
+            policy_file = os.path.join(temp_dir, "policy.txt")
             
-            # This should not raise an exception
-            synth._call_dtcontrol(None, output_file)
+            # Create a dummy policy file
+            with open(policy_file, 'w') as f:
+                f.write("dummy policy")
             
-            # Verify file was created
-            assert os.path.exists(output_file)
-            with open(output_file, 'r') as f:
-                content = f.read()
-                assert "digraph" in content
+            # Mock subprocess.run to create a sample .dot file
+            def mock_subprocess_run(*args, **kwargs):
+                # Create the output .dot file that dtcontrol would create
+                output_path = kwargs.get('timeout') or args[0][-2]  # Get output path from args
+                simple_dot = """digraph DecisionTree {
+                    node [shape=box];
+                    1 [label="s0"];
+                    2 [label="s1"];
+                    3 [label="a0"];
+                    4 [label="a1"];
+                    1 -> 2;
+                    1 -> 3;
+                    2 -> 4;
+                    2 -> 3;
+                }"""
+                with open(output_file, 'w') as f:
+                    f.write(simple_dot)
+                
+                # Return a mock result object
+                result = mock.Mock()
+                result.stdout = ""
+                result.stderr = ""
+                return result
+            
+            # Patch subprocess.run
+            with mock.patch('paynt.synthesizer.synthesizer_symbiotic.subprocess.run', side_effect=mock_subprocess_run):
+                synth._call_dtcontrol(policy_file, output_file)
+                
+                # Verify file was created
+                assert os.path.exists(output_file)
+                with open(output_file, 'r') as f:
+                    content = f.read()
+                    assert "digraph" in content
+    
+    def test_dtcontrol_timeout_handling(self):
+        """Test handling of dtcontrol timeout."""
+        class DummyQuotient:
+            def get_property(self):
+                return None
+        
+        synth = symbiotic.SynthesizerSymbiotic(DummyQuotient(), symbiotic_timeout=1)
+        
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_file = os.path.join(temp_dir, "output.dot")
+            policy_file = os.path.join(temp_dir, "policy.txt")
+            
+            # Mock subprocess.run to raise TimeoutExpired
+            with mock.patch('paynt.synthesizer.synthesizer_symbiotic.subprocess.run') as mock_run:
+                import subprocess
+                mock_run.side_effect = subprocess.TimeoutExpired("dtcontrol", 1)
+                
+                # Should raise RuntimeError
+                with pytest.raises(RuntimeError, match="timeout exceeded"):
+                    synth._call_dtcontrol(policy_file, output_file)
+    
+    def test_dtcontrol_not_found(self):
+        """Test handling when dtcontrol binary is not found."""
+        class DummyQuotient:
+            def get_property(self):
+                return None
+        
+        synth = symbiotic.SynthesizerSymbiotic(DummyQuotient(), dtcontrol_path="/nonexistent/dtcontrol")
+        
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_file = os.path.join(temp_dir, "output.dot")
+            policy_file = os.path.join(temp_dir, "policy.txt")
+            
+            # Mock subprocess.run to raise FileNotFoundError
+            with mock.patch('paynt.synthesizer.synthesizer_symbiotic.subprocess.run') as mock_run:
+                mock_run.side_effect = FileNotFoundError("dtcontrol not found")
+                
+                # Should raise RuntimeError with helpful message
+                with pytest.raises(RuntimeError, match="dtcontrol not found"):
+                    synth._call_dtcontrol(policy_file, output_file)
 
 
 if __name__ == "__main__":

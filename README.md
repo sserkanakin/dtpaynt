@@ -25,11 +25,11 @@ docker build --build-arg SRC_FOLDER=synthesis-modified -t dtpaynt-symbiotic .
 
 ```bash
 # Original
-docker run -v="$(pwd)/results-original":/opt/cav25-experiments/results \
+docker run -v="$(pwd)/results-original-smoke":/opt/cav25-experiments/results \
   dtpaynt-original ./experiments.sh --smoke-test --skip-omdt
 
 # Symbiotic  
-docker run -v="$(pwd)/results-symbiotic":/opt/cav25-experiments/results \
+docker run -v="$(pwd)/results-symbiotic-smoke":/opt/cav25-experiments/results \
   dtpaynt-symbiotic ./experiments.sh --smoke-test --skip-omdt
 ```
 
@@ -53,6 +53,12 @@ python3 compare_results.py \
   --symbiotic ./results-symbiotic \
   --output comparison_report.txt
 ```
+
+python3 compare_results.py \
+  --original ./results-original-smoke \
+  --symbiotic ./results-symbiotic-smoke \
+  --output comparison_report_smoke.txt
+
 
 ---
 

@@ -243,27 +243,44 @@ class SynthesizerSymbiotic(paynt.synthesizer.synthesizer.Synthesizer):
     def _call_dtcontrol(self, policy, output_dot):
         """Call dtcontrol to generate a decision tree from a policy."""
         try:
-            # This is a placeholder implementation
-            # In practice, dtcontrol needs to be invoked with proper arguments
-            # For now, we create a simple synthetic tree
-            logger.info(f"Mock dtcontrol call: would generate tree at {output_dot}")
+            # Prepare dtcontrol command
+            cmd = [
+                self.dtcontrol_path,
+                "--policy", policy,
+                "--output", output_dot,
+                "--format", "dot"
+            ]
             
-            # Create a simple test .dot file
-            simple_dot = """digraph DecisionTree {
-                node [shape=box];
-                1 [label="s0"];
-                2 [label="s1"];
-                3 [label="a0"];
-                4 [label="a1"];
-                1 -> 2;
-                1 -> 3;
-                2 -> 4;
-                2 -> 3;
-            }"""
+            logger.info(f"Calling dtcontrol: {' '.join(cmd)}")
             
-            with open(output_dot, 'w') as f:
-                f.write(simple_dot)
+            # Call dtcontrol with timeout
+            result = subprocess.run(
+                cmd,
+                check=True,
+                timeout=self.symbiotic_timeout,
+                capture_output=True,
+                text=True
+            )
+            
+            logger.info(f"dtcontrol successfully generated tree at {output_dot}")
+            
+            # Log dtcontrol output for debugging
+            if result.stdout:
+                logger.debug(f"dtcontrol stdout: {result.stdout}")
+            if result.stderr:
+                logger.debug(f"dtcontrol stderr: {result.stderr}")
                 
+        except subprocess.TimeoutExpired:
+            logger.error(f"dtcontrol call timed out after {self.symbiotic_timeout}s")
+            raise RuntimeError(f"dtcontrol timeout exceeded ({self.symbiotic_timeout}s)")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"dtcontrol failed with return code {e.returncode}")
+            logger.error(f"dtcontrol stdout: {e.stdout}")
+            logger.error(f"dtcontrol stderr: {e.stderr}")
+            raise RuntimeError(f"dtcontrol failed: {e.stderr}")
+        except FileNotFoundError:
+            logger.error(f"dtcontrol binary not found at: {self.dtcontrol_path}")
+            raise RuntimeError(f"dtcontrol not found at {self.dtcontrol_path}. Please install dtcontrol or set correct path with --dtcontrol-path")
         except Exception as e:
             logger.error(f"Error calling dtcontrol: {e}", exc_info=True)
             raise
