@@ -134,14 +134,14 @@ class DtcontrolWrapper:
             logger.error(f"✗ Error verifying dtcontrol: {e}")
             return False
     
-    def generate_tree_from_scheduler(self, scheduler_json: Union[Dict, str], 
+    def generate_tree_from_scheduler(self, scheduler_json: Union[Dict, list, str], 
                                     preset: str = DEFAULT_PRESET,
                                     output_dir: Optional[str] = None) -> DtcontrolResult:
         """
         Generate a decision tree from a scheduler using dtcontrol.
         
         Args:
-            scheduler_json: Scheduler as dict or JSON string or file path
+            scheduler_json: Scheduler as dict, list, JSON string or file path
             preset: dtcontrol preset to use (default, gini, entropy, maxminority)
             output_dir: Directory to save outputs (if None, uses temp dir)
         
@@ -277,13 +277,13 @@ class DtcontrolWrapper:
                 shutil.rmtree(temp_dir, ignore_errors=True)
                 logger.debug(f"Cleaned up temp directory: {temp_dir}")
     
-    def _write_scheduler_file(self, scheduler_data: Union[Dict, str], output_path: str) -> None:
+    def _write_scheduler_file(self, scheduler_data: Union[Dict, list, str], output_path: str) -> None:
         """Write scheduler data to file in the correct format."""
         with open(output_path, 'w') as f:
-            if isinstance(scheduler_data, dict):
+            if isinstance(scheduler_data, (dict, list)):
                 json.dump(scheduler_data, f, indent=2)
             elif isinstance(scheduler_data, str):
-                if scheduler_data.startswith('{'):
+                if scheduler_data.startswith('{') or scheduler_data.startswith('['):
                     # It's JSON content
                     f.write(scheduler_data)
                 else:
@@ -293,7 +293,7 @@ class DtcontrolWrapper:
             else:
                 raise ValueError(f"Unsupported scheduler data type: {type(scheduler_data)}")
     
-    def compare_presets(self, scheduler_json: Union[Dict, str]) -> Dict[str, DtcontrolResult]:
+    def compare_presets(self, scheduler_json: Union[Dict, list, str]) -> Dict[str, DtcontrolResult]:
         """
         Compare different dtcontrol presets on the same scheduler.
         
