@@ -93,14 +93,30 @@ for benchmark_dir in $benchmark_dirs; do
     echo "  → Output: $output_dir"
     echo "  → Using: $sketch_file, $props_file"
     
-    timeout 300 python3 /opt/paynt/paynt.py "$benchmark_dir" \
+    # Set options to match original experiments
+    # Default tree depth for smoke test is 1, for full is varies
+    tree_depth=1
+    if [[ "$ARGS" != *"--smoke-test"* ]]; then
+        tree_depth=8
+    fi
+    
+    options="--tree-depth=$tree_depth --tree-enumeration"
+    
+    # Add scheduler mapping for maze and omdt models (like original experiments)
+    if [[ "$benchmark_dir" == *"maze"* ]] || [[ "$benchmark_dir" == *"omdt"* ]]; then
+        options+=" --tree-map-scheduler $benchmark_dir/scheduler.storm.json"
+    fi
+    if [[ "$benchmark_dir" == *"qcomp"* ]]; then
+        options+=" --tree-map-scheduler $benchmark_dir/scheduler-random.storm.json"
+    fi
+    
+    options+=" --method symbiotic"
+    options+=" --export-synthesis $output_dir/tree"
+    
+    timeout 1200 python3 /opt/paynt/paynt.py "$benchmark_dir" \
         --sketch "$sketch_file" \
         --props "$props_file" \
-        --method symbiotic \
-        --symbiotic-iterations 5 \
-        --symbiotic-subtree-depth 3 \
-        --symbiotic-timeout 60 \
-        --export-synthesis "$output_dir/tree" \
+        $options \
         > "$output_dir/stdout.txt" 2>&1
     
     exit_code=$?
@@ -109,7 +125,7 @@ for benchmark_dir in $benchmark_dirs; do
         echo "  ✓ Success"
         success=$((success + 1))
     elif [ $exit_code -eq 124 ]; then
-        echo "  ⚠ Timeout (300s)"
+        echo "  ⚠ Timeout (1200s)"
         timeout=$((timeout + 1))
     else
         echo "  ✗ Failed (exit code: $exit_code)"
