@@ -289,7 +289,7 @@ class SynthesizerSymbiotic(paynt.synthesizer.synthesizer.Synthesizer):
         """Call dtcontrol to generate a decision tree from a policy using the wrapper.
         
         Args:
-            policy_mdp: Either a paynt.models.Mdp object or stormpy scheduler
+            policy_mdp: paynt.models.Mdp object
             output_dot: Path to save the tree JSON file
         
         The wrapper handles:
@@ -302,32 +302,29 @@ class SynthesizerSymbiotic(paynt.synthesizer.synthesizer.Synthesizer):
             self.dtcontrol_calls += 1
             logger.info(f"[dtcontrol call #{self.dtcontrol_calls}] Generating tree from policy...")
             
-            # Extract scheduler if we got an Mdp object
-            if hasattr(policy_mdp, 'model'):
-                # It's a paynt.models.Mdp object
-                # We need to extract the scheduler by model checking
-                import paynt.models.models
-                logger.debug("Extracting scheduler from Mdp object...")
-                result = policy_mdp.check_specification(self.quotient.specification)
-                if hasattr(result, 'optimality_result') and result.optimality_result is not None:
-                    scheduler = result.optimality_result.scheduler
-                    logger.debug(f"Extracted scheduler with value {result.optimality_result.value}")
-                else:
-                    logger.error("Could not extract scheduler from specification result")
-                    raise RuntimeError("No scheduler in specification result")
+            # Extract scheduler from Mdp object's specification result
+            logger.debug("Extracting scheduler from Mdp object...")
+            result = policy_mdp.check_specification(self.quotient.specification)
+            
+            # result.optimality_result is a PropertyResult
+            # The actual stormpy result is in result.optimality_result.result
+            if hasattr(result.optimality_result, 'result') and hasattr(result.optimality_result.result, 'scheduler'):
+                stormpy_result = result.optimality_result.result
+                scheduler = stormpy_result.scheduler
+                logger.debug(f"Extracted scheduler with value {result.optimality_result.value}")
             else:
-                # It's already a scheduler
-                scheduler = policy_mdp
+                logger.error("Could not extract scheduler from specification result")
+                raise RuntimeError("No scheduler in specification result")
             
             # Use the wrapper to generate tree
-            result = self.dtcontrol.generate_tree_from_scheduler(scheduler, preset="default")
+            result_wrapper = self.dtcontrol.generate_tree_from_scheduler(scheduler, preset="default")
             
-            if not result.success:
-                logger.error(f"dtcontrol failed: {result.error_msg}")
-                raise RuntimeError(f"dtcontrol failed: {result.error_msg}")
+            if not result_wrapper.success:
+                logger.error(f"dtcontrol failed: {result_wrapper.error_msg}")
+                raise RuntimeError(f"dtcontrol failed: {result_wrapper.error_msg}")
             
             # Validate the result
-            if not result.validate():
+            if not result_wrapper.validate():
                 logger.error("dtcontrol result validation failed")
                 raise RuntimeError("dtcontrol result validation failed")
             
@@ -336,10 +333,10 @@ class SynthesizerSymbiotic(paynt.synthesizer.synthesizer.Synthesizer):
             # Write the result to output file
             # (wrapper already validated and loaded the JSON)
             with open(output_dot, 'w') as f:
-                json.dump(result.tree_data, f, indent=2)
+                json.dump(result_wrapper.tree_data, f, indent=2)
             
             # Log statistics
-            stats = result.get_tree_stats()
+            stats = result_wrapper.get_tree_stats()
             logger.info(f"[dtcontrol success #{self.dtcontrol_successes}] Tree stats: {stats}")
             
         except Exception as e:
