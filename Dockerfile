@@ -30,4 +30,8 @@ RUN apt-get update && apt-get install -y vim
 RUN git clone https://github.com/randriu/dt-synthesis-cav-25.git cav25-experiments
 WORKDIR /opt/cav25-experiments
 
+# Copy the wrapper script for modified version (symbiotic synthesis)
+COPY ./${SRC_FOLDER}/experiments-with-symbiotic.sh /tmp/experiments-with-symbiotic.sh
+RUN if [ -f /tmp/experiments-with-symbiotic.sh ]; then cp /tmp/experiments-with-symbiotic.sh /opt/cav25-experiments/ && chmod +x /opt/cav25-experiments/experiments-with-symbiotic.sh; fi
+
 RUN export GRB_LICENSE_FILE=/opt/gurobi/gurobi.lic
