@@ -240,8 +240,8 @@ class SynthesizerSymbiotic(paynt.synthesizer.synthesizer.Synthesizer):
                 # For basic MDPs (no holes), directly model check to get optimal policy
                 logger.info("Model checking basic MDP to get optimal policy...")
                 
-                # The quotient itself is the MDP, model check it directly
-                mdp = self.quotient.mdp
+                # The quotient_mdp contains the actual MDP
+                mdp = self.quotient.quotient_mdp
                 result = mdp.check_specification(self.quotient.specification)
                 
                 if hasattr(result, 'scheduler') and result.scheduler is not None:
