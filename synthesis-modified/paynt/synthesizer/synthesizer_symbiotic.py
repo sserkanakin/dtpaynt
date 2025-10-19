@@ -217,29 +217,43 @@ class SynthesizerSymbiotic(paynt.synthesizer.synthesizer.Synthesizer):
             return None
     
     def _compute_optimal_policy(self):
-        """Compute optimal policy for the MDP using stormpy."""
+        """Compute optimal policy for the MDP using AR synthesis first."""
         try:
-            self.quotient.build_initial()
-            model = self.quotient.model
+            # For MDPs with families, run AR synthesis first to get an assignment
+            # Then compute policy from that assignment
+            from paynt.synthesizer.synthesizer_ar import SynthesizerAR
             
-            if not model.is_mdp:
-                logger.warning("Model is not an MDP, returning None")
+            logger.info("Running AR synthesis to get optimal assignment...")
+            ar_synthesizer = SynthesizerAR(self.quotient)
+            ar_result = ar_synthesizer.run()
+            
+            if ar_result is None or ar_synthesizer.best_assignment is None:
+                logger.warning("AR synthesis failed or produced no assignment")
                 return None
             
-            # Get the property and perform model checking
-            prop = self.quotient.get_property()
+            # Get the assignment
+            assignment = ar_synthesizer.best_assignment
+            logger.info(f"AR synthesis produced assignment: {assignment}")
             
-            # Build the full model if needed
-            self.quotient.build(self.quotient.family)
+            # Build the MDP for this assignment
+            mdp = self.quotient.build_assignment(assignment)
             
-            # Extract formula and check specification
-            result = model.check_specification(self.quotient.specification)
+            if mdp is None:
+                logger.warning("Could not build MDP for assignment")
+                return None
             
-            # Extract the policy scheduler
-            if hasattr(result, 'policy'):
+            # Check the specification to get the optimal policy
+            result = mdp.check_specification(self.quotient.specification)
+            
+            # Extract the policy scheduler  
+            if hasattr(result, 'scheduler') and result.scheduler is not None:
+                logger.info(f"Successfully extracted scheduler with value {result.optimality_result.value}")
+                return result.scheduler
+            elif hasattr(result, 'policy') and result.policy is not None:
+                logger.info(f"Successfully extracted policy with value {result.optimality_result.value}")
                 return result.policy
             
-            logger.warning("Could not extract policy from result")
+            logger.warning("Could not extract scheduler/policy from result")
             return None
             
         except Exception as e:
