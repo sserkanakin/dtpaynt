@@ -107,14 +107,17 @@ class SynthesizerSymbiotic(paynt.synthesizer.synthesizer.Synthesizer):
                    f"timeout={self.symbiotic_timeout}")
         
         # Check if this is an MDP with holes (MdpFamilyQuotient)
-        # If not, fall back to AR synthesis
+        # If not, fall back to decision tree synthesis
         import paynt.quotient.mdp_family
-        if not isinstance(self.quotient, paynt.quotient.mdp_family.MdpFamilyQuotient):
-            logger.info("Quotient is not an MdpFamilyQuotient, falling back to AR synthesis")
-            # Use AR synthesis instead
-            from paynt.synthesizer.synthesizer_ar import SynthesizerAR
-            ar_synthesizer = SynthesizerAR(self.quotient)
-            return ar_synthesizer.run(optimum_threshold)
+        import paynt.quotient.mdp
+        
+        if isinstance(self.quotient, paynt.quotient.mdp.MdpQuotient) and \
+           not isinstance(self.quotient, paynt.quotient.mdp_family.MdpFamilyQuotient):
+            logger.info("Quotient is basic MDP (not a family), falling back to decision tree synthesis")
+            # Use decision tree synthesis instead
+            from paynt.synthesizer.decision_tree import SynthesizerDecisionTree
+            dt_synthesizer = SynthesizerDecisionTree(self.quotient)
+            return dt_synthesizer.run(optimum_threshold)
         
         try:
             # Step 1: Generate initial tree using dtcontrol
