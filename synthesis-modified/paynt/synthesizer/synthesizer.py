@@ -20,7 +20,7 @@ class Synthesizer:
     export_synthesis_filename_base = None
 
     @staticmethod
-    def choose_synthesizer(quotient, method, fsc_synthesis=False, storm_control=None):
+    def choose_synthesizer(quotient, method, fsc_synthesis=False, storm_control=None, dtcontrol_path=None, symbiotic_iterations=None, symbiotic_subtree_depth=None, symbiotic_error_tolerance=None, symbiotic_timeout=None):
 
         # hiding imports here to avoid mutual top-level imports
         import paynt.quotient.mdp
@@ -38,6 +38,7 @@ class Synthesizer:
         import paynt.synthesizer.synthesizer_posmg
         import paynt.synthesizer.policy_tree
         import paynt.synthesizer.decision_tree
+        import paynt.synthesizer.synthesizer_symbiotic
 
         if isinstance(quotient, paynt.quotient.pomdp_family.PomdpFamilyQuotient):
             logger.info("nothing to do with the POMDP sketch, aborting...")
@@ -71,6 +72,8 @@ class Synthesizer:
             return paynt.synthesizer.synthesizer_hybrid.SynthesizerHybrid(quotient)
         if method == "ar_multicore":
             return paynt.synthesizer.synthesizer_multicore_ar.SynthesizerMultiCoreAR(quotient)
+        if method == "symbiotic":
+            return paynt.synthesizer.synthesizer_symbiotic.SynthesizerSymbiotic(quotient, dtcontrol_path, symbiotic_iterations, symbiotic_subtree_depth, symbiotic_error_tolerance, symbiotic_timeout)
         raise ValueError("invalid method name")
 
 

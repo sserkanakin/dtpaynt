@@ -71,7 +71,7 @@ def setup_logger(log_path = None):
     help="export the model to specified format and abort")
 
 @click.option("--method",
-    type=click.Choice(['onebyone', 'ar', 'cegis', 'hybrid', 'ar_multicore']),
+    type=click.Choice(['onebyone', 'ar', 'cegis', 'hybrid', 'ar_multicore', 'symbiotic']),
     default="ar", show_default=True,
     help="synthesis method"
     )
@@ -140,6 +140,18 @@ def setup_logger(log_path = None):
     "--ce-generator", type=click.Choice(["dtmc", "mdp"]), default="dtmc", show_default=True,
     help="counterexample generator",
 )
+
+@click.option("--dtcontrol-path", type=str, default="dtcontrol", show_default=True,
+    help="path to dtcontrol executable (symbiotic method only)")
+@click.option("--symbiotic-iterations", type=int, default=10, show_default=True,
+    help="number of refinement iterations for symbiotic method")
+@click.option("--symbiotic-subtree-depth", type=int, default=5, show_default=True,
+    help="depth of sub-trees to select for optimization in symbiotic method")
+@click.option("--symbiotic-error-tolerance", type=click.FLOAT, default=0.01, show_default=True,
+    help="maximum allowed performance degradation when replacing a sub-tree (symbiotic method only)")
+@click.option("--symbiotic-timeout", type=int, default=120, show_default=True,
+    help="timeout in seconds for each individual DTPAYNT sub-problem in symbiotic method")
+
 @click.option("--profiling", is_flag=True, default=False,
     help="run profiling")
 
@@ -158,6 +170,7 @@ def paynt_run(
     constraint_bound,
     dt_setting,
     ce_generator,
+    dtcontrol_path, symbiotic_iterations, symbiotic_subtree_depth, symbiotic_error_tolerance, symbiotic_timeout,
     profiling
 ):
 
@@ -201,7 +214,7 @@ def paynt_run(
     else:
         tree_helper_path = None
     quotient = paynt.parser.sketch.Sketch.load_sketch(sketch_path, properties_path, export, relative_error, precision, constraint_bound, tree_helper_path, exact)
-    synthesizer = paynt.synthesizer.synthesizer.Synthesizer.choose_synthesizer(quotient, method, fsc_synthesis, storm_control)
+    synthesizer = paynt.synthesizer.synthesizer.Synthesizer.choose_synthesizer(quotient, method, fsc_synthesis, storm_control, dtcontrol_path, symbiotic_iterations, symbiotic_subtree_depth, symbiotic_error_tolerance, symbiotic_timeout)
     synthesizer.run(optimum_threshold)
 
     if profiling:
