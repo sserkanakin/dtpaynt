@@ -1,7 +1,5 @@
 #!/bin/bash
 
-set -e
-
 # Wrapper script to run experiments.sh with symbiotic synthesis included
 
 # Get command line arguments (smoke-test, skip-omdt, etc.)
@@ -11,6 +9,11 @@ echo "=========================================="
 echo "Running standard experiments (AR, CEGIS, Hybrid)..."
 echo "=========================================="
 ./experiments.sh $ARGS
+exp_exit_code=$?
+
+if [ $exp_exit_code -ne 0 ]; then
+    echo "⚠ Standard experiments exited with code $exp_exit_code (continuing with symbiotic)"
+fi
 
 echo ""
 echo "=========================================="
