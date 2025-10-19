@@ -9,6 +9,7 @@ from pathlib import Path
 import paynt.synthesizer.synthesizer
 import paynt.synthesizer.policy_tree
 import paynt.utils.timer
+from paynt.synthesizer.dtcontrol_wrapper import DtcontrolWrapper, DtcontrolResult
 
 import logging
 logger = logging.getLogger(__name__)
@@ -81,12 +82,17 @@ class SynthesizerSymbiotic(paynt.synthesizer.synthesizer.Synthesizer):
         self.symbiotic_error_tolerance = symbiotic_error_tolerance
         self.symbiotic_timeout = symbiotic_timeout
         
+        # Initialize dtcontrol wrapper
+        self.dtcontrol = DtcontrolWrapper(dtcontrol_path=dtcontrol_path, timeout=symbiotic_timeout)
+        
         self.initial_tree = None
         self.final_tree = None
         self.initial_tree_size = None
         self.final_tree_size = None
         self.initial_value = None
         self.final_value = None
+        self.dtcontrol_calls = 0
+        self.dtcontrol_successes = 0
     
     @property
     def method_name(self):
@@ -241,89 +247,41 @@ class SynthesizerSymbiotic(paynt.synthesizer.synthesizer.Synthesizer):
             return None
     
     def _call_dtcontrol(self, policy, output_dot):
-        """Call dtcontrol to generate a decision tree from a policy.
+        """Call dtcontrol to generate a decision tree from a policy using the wrapper.
         
-        dtcontrol expects:
-        - A scheduler.storm.json file as input (the policy)
-        - Runs with -r flag (return decision tree)
-        - Generates output at: decision_trees/{setting}/scheduler/{setting}.json
+        The wrapper handles:
+        - Scheduler file preparation
+        - dtcontrol subprocess execution
+        - Result validation
+        - Error handling with detailed logging
         """
         try:
-            import os
-            import tempfile
+            self.dtcontrol_calls += 1
+            logger.info(f"[dtcontrol call #{self.dtcontrol_calls}] Generating tree from policy...")
             
-            # Create temporary directory for dtcontrol
-            with tempfile.TemporaryDirectory() as temp_dir:
-                # Write the policy to scheduler.storm.json
-                scheduler_json_path = os.path.join(temp_dir, "scheduler.storm.json")
-                
-                # If policy is already a JSON string, write it directly
-                if isinstance(policy, str):
-                    if policy.startswith('{'):
-                        # It's JSON content
-                        with open(scheduler_json_path, 'w') as f:
-                            f.write(policy)
-                    else:
-                        # It's a file path
-                        import shutil
-                        shutil.copy(policy, scheduler_json_path)
-                else:
-                    # Convert policy object to JSON
-                    import json
-                    with open(scheduler_json_path, 'w') as f:
-                        json.dump(policy, f, indent=4)
-                
-                # Prepare dtcontrol command (mimics decision_tree.py)
-                cmd = [
-                    self.dtcontrol_path,
-                    "--input", "scheduler.storm.json",
-                    "-r",  # Return decision tree
-                    "--use-preset", "default"
-                ]
-                
-                logger.info(f"Calling dtcontrol: {' '.join(cmd)} in {temp_dir}")
-                
-                # Call dtcontrol with timeout
-                result = subprocess.run(
-                    cmd,
-                    check=True,
-                    timeout=self.symbiotic_timeout,
-                    capture_output=True,
-                    text=True,
-                    cwd=temp_dir
-                )
-                
-                logger.info(f"dtcontrol succeeded")
-                
-                # Log dtcontrol output for debugging
-                if result.stdout:
-                    logger.debug(f"dtcontrol stdout: {result.stdout}")
-                if result.stderr:
-                    logger.debug(f"dtcontrol stderr: {result.stderr}")
-                
-                # dtcontrol generates output at: decision_trees/default/scheduler/default.json
-                dtcontrol_output = os.path.join(temp_dir, "decision_trees", "default", "scheduler", "default.json")
-                
-                if not os.path.exists(dtcontrol_output):
-                    raise RuntimeError(f"dtcontrol did not produce expected output at {dtcontrol_output}")
-                
-                # Copy the result to the requested output path
-                import shutil
-                shutil.copy(dtcontrol_output, output_dot)
-                
-                logger.info(f"dtcontrol decision tree copied to {output_dot}")
-                
-        except subprocess.TimeoutExpired:
-            logger.error(f"dtcontrol call timed out after {self.symbiotic_timeout}s")
-            raise RuntimeError(f"dtcontrol timeout exceeded ({self.symbiotic_timeout}s)")
-        except subprocess.CalledProcessError as e:
-            logger.error(f"dtcontrol failed with return code {e.returncode}")
-            logger.error(f"dtcontrol stdout: {e.stdout}")
-            logger.error(f"dtcontrol stderr: {e.stderr}")
-            raise RuntimeError(f"dtcontrol failed: {e.stderr}")
-        except FileNotFoundError:
-            logger.error(f"dtcontrol binary not found at: {self.dtcontrol_path}")
-            raise RuntimeError(f"dtcontrol not found at {self.dtcontrol_path}. Please install dtcontrol or set correct path with --dtcontrol-path")
+            # Use the wrapper to generate tree
+            result = self.dtcontrol.generate_tree_from_scheduler(policy, preset="default")
+            
+            if not result.success:
+                logger.error(f"dtcontrol failed: {result.error_msg}")
+                raise RuntimeError(f"dtcontrol failed: {result.error_msg}")
+            
+            # Validate the result
+            if not result.validate():
+                logger.error("dtcontrol result validation failed")
+                raise RuntimeError("dtcontrol result validation failed")
+            
+            self.dtcontrol_successes += 1
+            
+            # Write the result to output file
+            # (wrapper already validated and loaded the JSON)
+            with open(output_dot, 'w') as f:
+                json.dump(result.tree_data, f, indent=2)
+            
+            # Log statistics
+            stats = result.get_tree_stats()
+            logger.info(f"[dtcontrol success #{self.dtcontrol_successes}] Tree stats: {stats}")
+            
         except Exception as e:
             logger.error(f"Error calling dtcontrol: {e}", exc_info=True)
             raise
