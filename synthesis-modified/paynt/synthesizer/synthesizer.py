@@ -44,6 +44,10 @@ class Synthesizer:
             logger.info("nothing to do with the POMDP sketch, aborting...")
             exit(0)
         if isinstance(quotient, paynt.quotient.mdp.MdpQuotient):
+            # For MDPs, check if symbiotic method is requested
+            if method == "symbiotic":
+                return paynt.synthesizer.synthesizer_symbiotic.SynthesizerSymbiotic(quotient, dtcontrol_path, symbiotic_iterations, symbiotic_subtree_depth, symbiotic_error_tolerance, symbiotic_timeout)
+            # Default MDP handling for other methods
             return paynt.synthesizer.decision_tree.SynthesizerDecisionTree(quotient)
         # FSC synthesis for POMDPs
         if isinstance(quotient, paynt.quotient.pomdp.PomdpQuotient) and fsc_synthesis:
