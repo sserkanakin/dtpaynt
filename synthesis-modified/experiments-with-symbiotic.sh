@@ -77,10 +77,39 @@ for benchmark_dir in $benchmark_dirs; do
     output_dir="$results_dir/symbiotic/$model_name"
     mkdir -p "$output_dir"
     
+    # Determine which model and properties files to use
+    sketch_file="model-random.drn"
+    props_file="discounted.props"
+    
+    # For qcomp models, use model.prism and model.props if they exist
+    if [[ "$benchmark_dir" == *"qcomp"* ]]; then
+        if [ -f "$benchmark_dir/model.prism" ]; then
+            sketch_file="model.prism"
+        fi
+        if [ -f "$benchmark_dir/model.props" ]; then
+            props_file="model.props"
+        fi
+    fi
+    
+    # Check if the required files exist
+    if [ ! -f "$benchmark_dir/$sketch_file" ]; then
+        echo "  ✗ Skipped: $sketch_file not found"
+        failed=$((failed + 1))
+        continue
+    fi
+    if [ ! -f "$benchmark_dir/$props_file" ]; then
+        echo "  ✗ Skipped: $props_file not found"
+        failed=$((failed + 1))
+        continue
+    fi
+    
     # Run symbiotic synthesis with timeout
     echo "  → Output: $output_dir"
+    echo "  → Using: $sketch_file, $props_file"
     
     timeout 300 python3 /opt/paynt/paynt.py "$benchmark_dir" \
+        --sketch "$sketch_file" \
+        --props "$props_file" \
         --method symbiotic \
         --symbiotic-iterations 5 \
         --symbiotic-subtree-depth 3 \
