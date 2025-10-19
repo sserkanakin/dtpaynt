@@ -240,18 +240,20 @@ class SynthesizerSymbiotic(paynt.synthesizer.synthesizer.Synthesizer):
                 # For basic MDPs (no holes), directly model check to get optimal policy
                 logger.info("Model checking basic MDP to get optimal policy...")
                 
-                # The quotient_mdp contains the actual MDP
-                mdp = self.quotient.quotient_mdp
+                # The quotient_mdp contains the stormpy MDP
+                stormpy_mdp = self.quotient.quotient_mdp
+                
+                # Wrap in paynt.models.Mdp to get check_specification method
+                import paynt.models.models
+                mdp = paynt.models.models.Mdp(stormpy_mdp)
+                
                 result = mdp.check_specification(self.quotient.specification)
                 
-                if hasattr(result, 'scheduler') and result.scheduler is not None:
-                    logger.info(f"Successfully extracted scheduler with value {result.optimality_result.value}")
-                    return result.scheduler
-                elif hasattr(result, 'policy') and result.policy is not None:
-                    logger.info(f"Successfully extracted policy with value {result.optimality_result.value}")
-                    return result.policy
+                if hasattr(result, 'optimality_result') and result.optimality_result is not None:
+                    logger.info(f"Successfully extracted optimality value: {result.optimality_result.value}")
+                    return mdp
                 
-                logger.warning("Could not extract scheduler/policy from basic MDP result")
+                logger.warning("Could not extract optimality result from basic MDP")
                 return None
             else:
                 # For MDPs with families, run AR synthesis first to get an assignment
@@ -276,26 +278,19 @@ class SynthesizerSymbiotic(paynt.synthesizer.synthesizer.Synthesizer):
                     logger.warning("Could not build MDP for assignment")
                     return None
                 
-                # Check the specification to get the optimal policy
-                result = mdp.check_specification(self.quotient.specification)
-                
-                # Extract the policy scheduler  
-                if hasattr(result, 'scheduler') and result.scheduler is not None:
-                    logger.info(f"Successfully extracted scheduler with value {result.optimality_result.value}")
-                    return result.scheduler
-                elif hasattr(result, 'policy') and result.policy is not None:
-                    logger.info(f"Successfully extracted policy with value {result.optimality_result.value}")
-                    return result.policy
-                
-                logger.warning("Could not extract scheduler/policy from result")
-                return None
+                logger.info("Successfully extracted policy MDP from assignment")
+                return mdp
             
         except Exception as e:
             logger.error(f"Error computing optimal policy: {e}", exc_info=True)
             return None
     
-    def _call_dtcontrol(self, policy, output_dot):
+    def _call_dtcontrol(self, policy_mdp, output_dot):
         """Call dtcontrol to generate a decision tree from a policy using the wrapper.
+        
+        Args:
+            policy_mdp: Either a paynt.models.Mdp object or stormpy scheduler
+            output_dot: Path to save the tree JSON file
         
         The wrapper handles:
         - Scheduler file preparation
@@ -307,8 +302,25 @@ class SynthesizerSymbiotic(paynt.synthesizer.synthesizer.Synthesizer):
             self.dtcontrol_calls += 1
             logger.info(f"[dtcontrol call #{self.dtcontrol_calls}] Generating tree from policy...")
             
+            # Extract scheduler if we got an Mdp object
+            if hasattr(policy_mdp, 'model'):
+                # It's a paynt.models.Mdp object
+                # We need to extract the scheduler by model checking
+                import paynt.models.models
+                logger.debug("Extracting scheduler from Mdp object...")
+                result = policy_mdp.check_specification(self.quotient.specification)
+                if hasattr(result, 'optimality_result') and result.optimality_result is not None:
+                    scheduler = result.optimality_result.scheduler
+                    logger.debug(f"Extracted scheduler with value {result.optimality_result.value}")
+                else:
+                    logger.error("Could not extract scheduler from specification result")
+                    raise RuntimeError("No scheduler in specification result")
+            else:
+                # It's already a scheduler
+                scheduler = policy_mdp
+            
             # Use the wrapper to generate tree
-            result = self.dtcontrol.generate_tree_from_scheduler(policy, preset="default")
+            result = self.dtcontrol.generate_tree_from_scheduler(scheduler, preset="default")
             
             if not result.success:
                 logger.error(f"dtcontrol failed: {result.error_msg}")
