@@ -293,46 +293,55 @@ class TestMockIntegration:
         synth = symbiotic.SynthesizerSymbiotic(DummyQuotient())
         
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_file = os.path.join(temp_dir, "output.dot")
-            policy_file = os.path.join(temp_dir, "policy.txt")
+            output_file = os.path.join(temp_dir, "output.json")
+            policy_json = {
+                "scheduler": {
+                    "0": {"type": "fixed", "choice": 0},
+                    "1": {"type": "fixed", "choice": 1},
+                }
+            }
             
-            # Create a dummy policy file
-            with open(policy_file, 'w') as f:
-                f.write("dummy policy")
-            
-            # Mock subprocess.run to create a sample .dot file
+            # Mock subprocess.run to simulate dtcontrol creating output
             def mock_subprocess_run(*args, **kwargs):
-                # Create the output .dot file that dtcontrol would create
-                output_path = kwargs.get('timeout') or args[0][-2]  # Get output path from args
-                simple_dot = """digraph DecisionTree {
-                    node [shape=box];
-                    1 [label="s0"];
-                    2 [label="s1"];
-                    3 [label="a0"];
-                    4 [label="a1"];
-                    1 -> 2;
-                    1 -> 3;
-                    2 -> 4;
-                    2 -> 3;
-                }"""
-                with open(output_file, 'w') as f:
-                    f.write(simple_dot)
+                # dtcontrol creates: decision_trees/default/scheduler/default.json
+                cwd = kwargs.get('cwd', '.')
+                dtcontrol_output_dir = os.path.join(cwd, "decision_trees", "default", "scheduler")
+                os.makedirs(dtcontrol_output_dir, exist_ok=True)
+                
+                # Create a simple tree JSON (dtcontrol format)
+                tree_json = {
+                    "type": "decision_tree",
+                    "root": {
+                        "type": "node",
+                        "id": 0,
+                        "test": "s < 5",
+                        "children": [
+                            {"type": "leaf", "action": "a0"},
+                            {"type": "leaf", "action": "a1"}
+                        ]
+                    }
+                }
+                
+                output_path = os.path.join(dtcontrol_output_dir, "default.json")
+                with open(output_path, 'w') as f:
+                    import json
+                    json.dump(tree_json, f)
                 
                 # Return a mock result object
                 result = mock.Mock()
-                result.stdout = ""
+                result.stdout = "dtcontrol success"
                 result.stderr = ""
                 return result
             
             # Patch subprocess.run
             with mock.patch('paynt.synthesizer.synthesizer_symbiotic.subprocess.run', side_effect=mock_subprocess_run):
-                synth._call_dtcontrol(policy_file, output_file)
+                synth._call_dtcontrol(policy_json, output_file)
                 
                 # Verify file was created
                 assert os.path.exists(output_file)
                 with open(output_file, 'r') as f:
                     content = f.read()
-                    assert "digraph" in content
+                    assert "decision_tree" in content
     
     def test_dtcontrol_timeout_handling(self):
         """Test handling of dtcontrol timeout."""

@@ -241,34 +241,77 @@ class SynthesizerSymbiotic(paynt.synthesizer.synthesizer.Synthesizer):
             return None
     
     def _call_dtcontrol(self, policy, output_dot):
-        """Call dtcontrol to generate a decision tree from a policy."""
+        """Call dtcontrol to generate a decision tree from a policy.
+        
+        dtcontrol expects:
+        - A scheduler.storm.json file as input (the policy)
+        - Runs with -r flag (return decision tree)
+        - Generates output at: decision_trees/{setting}/scheduler/{setting}.json
+        """
         try:
-            # Prepare dtcontrol command
-            cmd = [
-                self.dtcontrol_path,
-                "--policy", policy,
-                "--output", output_dot,
-                "--format", "dot"
-            ]
+            import os
+            import tempfile
             
-            logger.info(f"Calling dtcontrol: {' '.join(cmd)}")
-            
-            # Call dtcontrol with timeout
-            result = subprocess.run(
-                cmd,
-                check=True,
-                timeout=self.symbiotic_timeout,
-                capture_output=True,
-                text=True
-            )
-            
-            logger.info(f"dtcontrol successfully generated tree at {output_dot}")
-            
-            # Log dtcontrol output for debugging
-            if result.stdout:
-                logger.debug(f"dtcontrol stdout: {result.stdout}")
-            if result.stderr:
-                logger.debug(f"dtcontrol stderr: {result.stderr}")
+            # Create temporary directory for dtcontrol
+            with tempfile.TemporaryDirectory() as temp_dir:
+                # Write the policy to scheduler.storm.json
+                scheduler_json_path = os.path.join(temp_dir, "scheduler.storm.json")
+                
+                # If policy is already a JSON string, write it directly
+                if isinstance(policy, str):
+                    if policy.startswith('{'):
+                        # It's JSON content
+                        with open(scheduler_json_path, 'w') as f:
+                            f.write(policy)
+                    else:
+                        # It's a file path
+                        import shutil
+                        shutil.copy(policy, scheduler_json_path)
+                else:
+                    # Convert policy object to JSON
+                    import json
+                    with open(scheduler_json_path, 'w') as f:
+                        json.dump(policy, f, indent=4)
+                
+                # Prepare dtcontrol command (mimics decision_tree.py)
+                cmd = [
+                    self.dtcontrol_path,
+                    "--input", "scheduler.storm.json",
+                    "-r",  # Return decision tree
+                    "--use-preset", "default"
+                ]
+                
+                logger.info(f"Calling dtcontrol: {' '.join(cmd)} in {temp_dir}")
+                
+                # Call dtcontrol with timeout
+                result = subprocess.run(
+                    cmd,
+                    check=True,
+                    timeout=self.symbiotic_timeout,
+                    capture_output=True,
+                    text=True,
+                    cwd=temp_dir
+                )
+                
+                logger.info(f"dtcontrol succeeded")
+                
+                # Log dtcontrol output for debugging
+                if result.stdout:
+                    logger.debug(f"dtcontrol stdout: {result.stdout}")
+                if result.stderr:
+                    logger.debug(f"dtcontrol stderr: {result.stderr}")
+                
+                # dtcontrol generates output at: decision_trees/default/scheduler/default.json
+                dtcontrol_output = os.path.join(temp_dir, "decision_trees", "default", "scheduler", "default.json")
+                
+                if not os.path.exists(dtcontrol_output):
+                    raise RuntimeError(f"dtcontrol did not produce expected output at {dtcontrol_output}")
+                
+                # Copy the result to the requested output path
+                import shutil
+                shutil.copy(dtcontrol_output, output_dot)
+                
+                logger.info(f"dtcontrol decision tree copied to {output_dot}")
                 
         except subprocess.TimeoutExpired:
             logger.error(f"dtcontrol call timed out after {self.symbiotic_timeout}s")
