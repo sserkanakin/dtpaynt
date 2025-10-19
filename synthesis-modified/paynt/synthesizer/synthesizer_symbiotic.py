@@ -48,6 +48,12 @@ class SynthesizerSymbiotic(paynt.synthesizer.synthesizer.Synthesizer):
     
     def run(self, optimum_threshold=None):
         """Main entry point for symbiotic synthesis."""
+        print("\n" + "="*80)
+        print("SYMBIOTIC SYNTHESIS PIPELINE - DTCONTROL INTEGRATION")
+        print("="*80)
+        logger.info("="*80)
+        logger.info("SYMBIOTIC SYNTHESIS PIPELINE - DTCONTROL INTEGRATION")
+        logger.info("="*80)
         logger.info("Starting symbiotic synthesis using dtcontrol")
         logger.info(f"Timeout: {self.symbiotic_timeout}s")
         
@@ -59,179 +65,237 @@ class SynthesizerSymbiotic(paynt.synthesizer.synthesizer.Synthesizer):
                        not isinstance(self.quotient, paynt.quotient.mdp_family.MdpFamilyQuotient)
         
         if is_basic_mdp:
-            logger.info("Quotient is basic MDP (not a family)")
-            logger.info("Using dtcontrol for tree generation")
+            logger.info("[PIPELINE] Quotient type: Basic MDP (not a family)")
+            logger.info("[PIPELINE] Tree generation method: DTCONTROL")
+            print("[PIPELINE] Quotient type: Basic MDP (not a family)")
+            print("[PIPELINE] Tree generation method: DTCONTROL")
             self.is_basic_mdp = True
         else:
-            logger.warning("Symbiotic synthesis for MDP families not yet implemented")
+            logger.warning("[PIPELINE] Quotient is MDP family - symbiotic synthesis for families not yet implemented")
             return None
         
         try:
             # Generate initial tree using dtcontrol
-            logger.info("Step 1: Generating initial decision tree using dtcontrol...")
+            logger.info("[PIPELINE] Step 1: Generating initial decision tree using dtcontrol...")
+            print("[PIPELINE] Step 1: Generating initial decision tree using dtcontrol...")
             self.initial_tree = self._generate_initial_tree()
             
             if self.initial_tree is None:
-                logger.error("Failed to generate initial tree")
+                logger.error("[PIPELINE] ERROR: Failed to generate initial tree")
+                print("[PIPELINE] ERROR: Failed to generate initial tree")
                 return None
             
             self.initial_tree_size = len(self.initial_tree.collect_nonterminals())
-            logger.info(f"Initial tree: {self.initial_tree_size} decision nodes, depth: {self.initial_tree.get_depth()}")
+            logger.info(f"[PIPELINE] SUCCESS: Generated tree with {self.initial_tree_size} decision nodes, depth {self.initial_tree.get_depth()}")
+            print(f"[PIPELINE] SUCCESS: Generated tree with {self.initial_tree_size} decision nodes, depth {self.initial_tree.get_depth()}")
             
             # Use initial tree as final tree
             self.final_tree = self.initial_tree
             self.final_tree_size = len(self.initial_tree.collect_nonterminals())
             self.final_value = self.initial_value if self.initial_value is not None else 0.5
             
-            logger.info(f"\n=== Symbiotic Synthesis Complete ===")
-            logger.info(f"Generated tree: {self.final_tree_size} decision nodes, depth: {self.final_tree.get_depth()}")
+            logger.info("[PIPELINE] Step 2: Finalizing results...")
+            print("[PIPELINE] Step 2: Finalizing results...")
+            logger.info(f"[PIPELINE] Final tree: {self.final_tree_size} decision nodes, depth {self.final_tree.get_depth()}, value {self.final_value}")
+            print(f"[PIPELINE] Final tree: {self.final_tree_size} decision nodes, depth {self.final_tree.get_depth()}, value {self.final_value}")
             
             # Export results
             self._export_trees()
             
+            logger.info("="*80)
+            logger.info("SYMBIOTIC SYNTHESIS COMPLETE - DTCONTROL PIPELINE SUCCESSFUL")
+            logger.info("="*80)
+            print("="*80)
+            print("SYMBIOTIC SYNTHESIS COMPLETE - DTCONTROL PIPELINE SUCCESSFUL")
+            print("="*80 + "\n")
+            
             return self.final_tree
             
         except Exception as e:
-            logger.error(f"Error during symbiotic synthesis: {e}", exc_info=True)
+            logger.error(f"[PIPELINE] ERROR during symbiotic synthesis: {e}", exc_info=True)
             raise
     
     def _generate_initial_tree(self):
         """Generate initial decision tree using dtcontrol from optimal scheduler."""
         try:
-            logger.info("Step 1: Generating initial decision tree using dtcontrol...")
+            logger.info("\n[DTCONTROL] ========== PHASE 1: OPTIMAL POLICY COMPUTATION ==========")
+            logger.info("[DTCONTROL] Computing optimal tabular policy...")
+            print("[DTCONTROL] ========== PHASE 1: OPTIMAL POLICY COMPUTATION ==========")
+            print("[DTCONTROL] Computing optimal tabular policy...")
             
-            # Compute optimal tabular policy/scheduler
-            logger.info("Computing optimal tabular policy...")
             policy_mdp = self._compute_optimal_policy()
             
             if policy_mdp is None:
-                logger.error("Failed to compute optimal policy")
+                logger.error("[DTCONTROL] ERROR: Failed to compute optimal policy")
+                print("[DTCONTROL] ERROR: Failed to compute optimal policy")
                 return None
             
-            # Extract scheduler and call dtcontrol
-            logger.info("Extracting scheduler from optimal policy...")
+            logger.info("[DTCONTROL] ========== PHASE 2: SCHEDULER EXTRACTION ==========")
+            logger.info("[DTCONTROL] Extracting scheduler from optimal policy...")
+            print("[DTCONTROL] ========== PHASE 2: SCHEDULER EXTRACTION ==========")
+            print("[DTCONTROL] Extracting scheduler from optimal policy...")
             
             # Model check to get scheduler
             result = policy_mdp.check_specification(self.quotient.specification)
             if not hasattr(result, 'optimality_result') or result.optimality_result is None:
-                logger.error("Could not extract optimality result")
+                logger.error("[DTCONTROL] ERROR: Could not extract optimality result")
+                print("[DTCONTROL] ERROR: Could not extract optimality result")
                 return None
             
             # Get the stormpy result which has the scheduler
             if not hasattr(result.optimality_result, 'result'):
-                logger.error("PropertyResult does not have .result attribute")
+                logger.error("[DTCONTROL] ERROR: PropertyResult does not have .result attribute")
+                print("[DTCONTROL] ERROR: PropertyResult does not have .result attribute")
                 return None
                 
             stormpy_result = result.optimality_result.result
             if not hasattr(stormpy_result, 'scheduler'):
-                logger.error("Stormpy result does not have scheduler")
+                logger.error("[DTCONTROL] ERROR: Stormpy result does not have scheduler")
+                print("[DTCONTROL] ERROR: Stormpy result does not have scheduler")
                 return None
             
             scheduler = stormpy_result.scheduler
-            logger.info(f"Extracted scheduler with value {result.optimality_result.value}")
+            optimal_value = result.optimality_result.value
+            self.initial_value = optimal_value
+            logger.info(f"[DTCONTROL] SUCCESS: Extracted scheduler with optimal value: {optimal_value}")
+            print(f"[DTCONTROL] SUCCESS: Extracted scheduler with optimal value: {optimal_value}")
             
-            # Convert scheduler to JSON
-            logger.info("Converting scheduler to JSON format...")
+            logger.info("[DTCONTROL] ========== PHASE 3: SCHEDULER JSON CONVERSION ==========")
+            logger.info("[DTCONTROL] Converting scheduler to JSON format...")
+            print("[DTCONTROL] ========== PHASE 3: SCHEDULER JSON CONVERSION ==========")
+            print("[DTCONTROL] Converting scheduler to JSON format...")
+            
             scheduler_json_str = scheduler.to_json_str(self.quotient.quotient_mdp, skip_dont_care_states=True)
-            logger.debug(f"Scheduler JSON size: {len(scheduler_json_str)} bytes")
+            logger.info(f"[DTCONTROL] SUCCESS: Scheduler converted to JSON ({len(scheduler_json_str)} bytes)")
+            print(f"[DTCONTROL] SUCCESS: Scheduler converted to JSON ({len(scheduler_json_str)} bytes)")
             
             # Create temp directory for dtcontrol
             temp_dir = tempfile.mkdtemp(prefix="dtcontrol_symbiotic_")
+            logger.info(f"[DTCONTROL] Created temp directory: {temp_dir}")
+            print(f"[DTCONTROL] Created temp directory: {temp_dir}")
+            
             try:
                 # Write scheduler to file
                 scheduler_path = os.path.join(temp_dir, "scheduler.storm.json")
                 with open(scheduler_path, 'w') as f:
                     f.write(scheduler_json_str)
-                logger.debug(f"Scheduler written to {scheduler_path}")
+                logger.info(f"[DTCONTROL] SUCCESS: Scheduler written to {scheduler_path}")
+                print(f"[DTCONTROL] SUCCESS: Scheduler written to {scheduler_path}")
                 
-                # Call dtcontrol
-                logger.info("Calling dtcontrol...")
+                logger.info("[DTCONTROL] ========== PHASE 4: DTCONTROL EXECUTION ==========")
+                logger.info("[DTCONTROL] Calling dtcontrol subprocess...")
+                print("[DTCONTROL] ========== PHASE 4: DTCONTROL EXECUTION ==========")
+                print("[DTCONTROL] Calling dtcontrol subprocess...")
+                print("[DTCONTROL] Command: dtcontrol --input scheduler.storm.json -r --use-preset default")
+                
                 cmd = ["dtcontrol", "--input", "scheduler.storm.json", "-r", "--use-preset", "default"]
                 result = subprocess.run(cmd, cwd=temp_dir, capture_output=True, text=True, timeout=120)
                 
-                logger.debug(f"dtcontrol stdout:\n{result.stdout}")
+                logger.info("[DTCONTROL] STDOUT from dtcontrol:")
+                for line in result.stdout.split('\n'):
+                    if line.strip():
+                        logger.info(f"[DTCONTROL]   {line}")
+                        print(f"[DTCONTROL]   {line}")
+                
                 if result.stderr:
-                    logger.debug(f"dtcontrol stderr:\n{result.stderr}")
+                    logger.info("[DTCONTROL] STDERR from dtcontrol:")
+                    for line in result.stderr.split('\n'):
+                        if line.strip():
+                            logger.info(f"[DTCONTROL]   {line}")
+                            print(f"[DTCONTROL]   {line}")
                 
                 # Check if tree was generated
                 tree_path = os.path.join(temp_dir, "decision_trees", "default", "scheduler", "default.json")
                 if not os.path.exists(tree_path):
-                    logger.warning(f"dtcontrol did not generate tree at {tree_path}")
-                    logger.info("Falling back to AR synthesis...")
+                    logger.warning(f"[DTCONTROL] WARNING: dtcontrol did not generate tree at {tree_path}")
+                    logger.info("[DTCONTROL] Falling back to AR synthesis...")
+                    print(f"[DTCONTROL] WARNING: dtcontrol did not generate tree at {tree_path}")
+                    print("[DTCONTROL] Falling back to AR synthesis...")
                     return None
                 
-                # Parse the tree using the correct parser
-                logger.info(f"Parsing dtcontrol tree from {tree_path}")
-                tree_helper = parse_tree_helper(tree_path)
+                logger.info("[DTCONTROL] ========== PHASE 5: TREE PARSING & CONVERSION ==========")
+                logger.info(f"[DTCONTROL] Parsing dtcontrol tree from {tree_path}")
+                print("[DTCONTROL] ========== PHASE 5: TREE PARSING & CONVERSION ==========")
+                print(f"[DTCONTROL] Parsing dtcontrol tree from {tree_path}")
                 
-                # Convert to internal tree representation
+                tree_helper = parse_tree_helper(tree_path)
+                logger.info("[DTCONTROL] SUCCESS: Tree parsed from JSON")
+                print("[DTCONTROL] SUCCESS: Tree parsed from JSON")
+                
+                logger.info("[DTCONTROL] Building PAYNT DecisionTree object...")
+                print("[DTCONTROL] Building PAYNT DecisionTree object...")
+                
                 tree = self.quotient.build_tree_helper_tree(tree_helper)
-                logger.info(f"Successfully generated initial tree: {tree.get_depth()} depth, {len(tree.collect_nonterminals())} decision nodes")
+                
+                tree_depth = tree.get_depth()
+                tree_nodes = len(tree.collect_nonterminals())
+                logger.info(f"[DTCONTROL] SUCCESS: PAYNT DecisionTree created: depth={tree_depth}, nodes={tree_nodes}")
+                print(f"[DTCONTROL] SUCCESS: PAYNT DecisionTree created: depth={tree_depth}, nodes={tree_nodes}")
+                
+                logger.info("[DTCONTROL] ========== PHASE 5 COMPLETE ==========")
+                print("[DTCONTROL] ========== PHASE 5 COMPLETE ==========")
                 
                 return tree
                 
             finally:
                 # Clean up temp directory
+                logger.info(f"[DTCONTROL] Cleaning up temp directory: {temp_dir}")
                 shutil.rmtree(temp_dir, ignore_errors=True)
                 
         except subprocess.TimeoutExpired:
-            logger.warning("dtcontrol timed out - falling back to AR synthesis")
+            logger.warning("[DTCONTROL] WARNING: dtcontrol timed out - falling back to AR synthesis")
+            print("[DTCONTROL] WARNING: dtcontrol timed out - falling back to AR synthesis")
             return None
         except Exception as e:
-            logger.warning(f"dtcontrol tree generation failed: {e} - falling back to AR synthesis")
-            logger.debug(f"Full error", exc_info=True)
+            logger.warning(f"[DTCONTROL] WARNING: dtcontrol tree generation failed: {e}")
+            logger.debug(f"[DTCONTROL] Full error", exc_info=True)
+            print(f"[DTCONTROL] WARNING: dtcontrol tree generation failed: {e}")
             return None
     
     def _compute_optimal_policy(self):
-        """Compute optimal policy for the MDP using AR synthesis (families) or model checking (basic MDPs)."""
+        """Compute optimal policy for the MDP using model checking (basic MDPs)."""
         try:
             if self.is_basic_mdp:
                 # For basic MDPs (no holes), directly model check to get optimal policy
-                logger.info("Model checking basic MDP to get optimal policy...")
+                logger.info("[DTPAYNT] Model checking basic MDP to get optimal policy...")
+                print("[DTPAYNT] Model checking basic MDP to get optimal policy...")
                 
                 # The quotient_mdp contains the stormpy MDP
                 stormpy_mdp = self.quotient.quotient_mdp
+                logger.info(f"[DTPAYNT] MDP has {stormpy_mdp.nr_states} states")
+                print(f"[DTPAYNT] MDP has {stormpy_mdp.nr_states} states")
                 
                 # Wrap in paynt.models.Mdp to get check_specification method
                 import paynt.models.models
                 mdp = paynt.models.models.Mdp(stormpy_mdp)
+                logger.info("[DTPAYNT] Wrapped MDP in paynt.models.Mdp")
+                print("[DTPAYNT] Wrapped MDP in paynt.models.Mdp")
+                
+                logger.info("[DTPAYNT] Running model checking with stormpy...")
+                print("[DTPAYNT] Running model checking with stormpy...")
                 
                 result = mdp.check_specification(self.quotient.specification)
                 
                 if hasattr(result, 'optimality_result') and result.optimality_result is not None:
-                    logger.info(f"Successfully extracted optimality value: {result.optimality_result.value}")
+                    optimal_value = result.optimality_result.value
+                    logger.info(f"[DTPAYNT] SUCCESS: Model checking complete")
+                    logger.info(f"[DTPAYNT] Optimal value: {optimal_value}")
+                    print(f"[DTPAYNT] SUCCESS: Model checking complete")
+                    print(f"[DTPAYNT] Optimal value: {optimal_value}")
                     return mdp
                 
-                logger.warning("Could not extract optimality result from basic MDP")
+                logger.warning("[DTPAYNT] WARNING: Could not extract optimality result from basic MDP")
+                print("[DTPAYNT] WARNING: Could not extract optimality result from basic MDP")
                 return None
             else:
-                # For MDPs with families, run AR synthesis first to get an assignment
-                from paynt.synthesizer.synthesizer_ar import SynthesizerAR
-                
-                logger.info("Running AR synthesis to get optimal assignment...")
-                ar_synthesizer = SynthesizerAR(self.quotient)
-                ar_result = ar_synthesizer.run()
-                
-                if ar_result is None or ar_synthesizer.best_assignment is None:
-                    logger.warning("AR synthesis failed or produced no assignment")
-                    return None
-                
-                # Get the assignment
-                assignment = ar_synthesizer.best_assignment
-                logger.info(f"AR synthesis produced assignment: {assignment}")
-                
-                # Build the MDP for this assignment
-                mdp = self.quotient.build_assignment(assignment)
-                
-                if mdp is None:
-                    logger.warning("Could not build MDP for assignment")
-                    return None
-                
-                logger.info("Successfully extracted policy MDP from assignment")
-                return mdp
+                # For MDPs with families, would run AR synthesis
+                logger.warning("[DTPAYNT] MDP families not supported in current implementation")
+                print("[DTPAYNT] MDP families not supported in current implementation")
+                return None
             
         except Exception as e:
-            logger.error(f"Error computing optimal policy: {e}", exc_info=True)
+            logger.error(f"[DTPAYNT] ERROR computing optimal policy: {e}", exc_info=True)
+            print(f"[DTPAYNT] ERROR computing optimal policy: {e}")
             return None
     
     def _select_subtree(self, tree, target_depth=None):
@@ -239,15 +303,50 @@ class SynthesizerSymbiotic(paynt.synthesizer.synthesizer.Synthesizer):
         return None
     
     def _export_trees(self):
-        """Log tree export information."""
+        """Export tree to DOT and PNG formats."""
         try:
             if self.final_tree is None:
                 logger.warning("No final tree to export")
                 return
             
-            logger.info(f"Final tree: {len(self.final_tree.collect_nonterminals())} decision nodes, "
-                       f"depth: {self.final_tree.get_depth()}")
-            logger.info("Tree exported successfully (future: add tree serialization)")
+            num_nodes = len(self.final_tree.collect_nonterminals())
+            depth = self.final_tree.get_depth()
+            logger.info(f"Final tree: {num_nodes} decision nodes, depth: {depth}")
+            
+            # Export to DOT and PNG if export_synthesis_filename_base is set
+            if self.export_synthesis_filename_base is not None:
+                self._export_decision_tree(self.final_tree, self.export_synthesis_filename_base)
             
         except Exception as e:
             logger.error(f"Error exporting trees: {e}", exc_info=True)
+    
+    def _export_decision_tree(self, decision_tree, export_filename_base):
+        """Export decision tree to DOT and PNG files (graphviz format)."""
+        try:
+            import os
+            
+            # Convert to graphviz
+            tree = decision_tree.to_graphviz()
+            
+            # Export DOT file
+            tree_filename = export_filename_base + ".dot"
+            directory = os.path.dirname(tree_filename)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+            with open(tree_filename, 'w') as file:
+                file.write(tree.source)
+            logger.info(f"[EXPORT] Exported decision tree to {tree_filename}")
+            print(f"[EXPORT] Exported decision tree to {tree_filename}")
+            
+            # Render to PNG
+            tree_visualization_filename = export_filename_base + ".png"
+            tree.render(export_filename_base, format="png", cleanup=True)
+            logger.info(f"[EXPORT] Exported decision tree visualization to {tree_visualization_filename}")
+            print(f"[EXPORT] Exported decision tree visualization to {tree_visualization_filename}")
+            
+        except ImportError:
+            logger.warning("[EXPORT] graphviz module not available, skipping visualization export")
+            print("[EXPORT] graphviz module not available, skipping visualization export")
+        except Exception as e:
+            logger.error(f"[EXPORT] Error exporting tree: {e}", exc_info=True)
+            print(f"[EXPORT] Error exporting tree: {e}")
