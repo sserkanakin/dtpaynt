@@ -81,13 +81,10 @@ for benchmark_dir in $benchmark_dirs; do
     sketch_file="model-random.drn"
     props_file="discounted.props"
     
-    # For qcomp models, use model.prism and model.props if they exist
+    # For qcomp models, prefer model-random-enabled.drn if available
     if [[ "$benchmark_dir" == *"qcomp"* ]]; then
-        if [ -f "$benchmark_dir/model.prism" ]; then
-            sketch_file="model.prism"
-        fi
-        if [ -f "$benchmark_dir/model.props" ]; then
-            props_file="model.props"
+        if [ -f "$benchmark_dir/model-random-enabled.drn" ]; then
+            sketch_file="model-random-enabled.drn"
         fi
     fi
     
