@@ -98,13 +98,22 @@ The **modified** version adds a hybrid synthesis method that:
 - Produces smaller, higher-quality trees
 - Configurable trade-offs via parameters
 
-**Usage:**
+**Usage (with benchmark models):**
 ```bash
 docker run dtpaynt-symbiotic python3 /opt/paynt/paynt.py \
-  /opt/cav25-experiments/models/maze \
+  ./benchmarks/smoketest/maze/steps \
+  --sketch model-random.drn \
+  --props discounted.props \
   --method symbiotic \
-  --symbiotic-iterations 10
+  --symbiotic-iterations 5
 ```
+
+**Parameters for Symbiotic:**
+- `--dtcontrol-path TEXT` - Path to dtcontrol (default: "dtcontrol")
+- `--symbiotic-iterations INT` - Refinement iterations (default: 10)
+- `--symbiotic-subtree-depth INT` - Sub-tree depth target (default: 5)
+- `--symbiotic-error-tolerance FLOAT` - Max quality drop 0.0-1.0 (default: 0.01)
+- `--symbiotic-timeout INT` - Per-subproblem timeout seconds (default: 120)
 
 ---
 
@@ -195,12 +204,17 @@ cd dtpaynt
 docker build --build-arg SRC_FOLDER=synthesis-original -t dtpaynt-original .
 docker build --build-arg SRC_FOLDER=synthesis-modified -t dtpaynt-symbiotic .
 
-# 3. Run smoke test on new image
-mkdir results
-docker run -v="$(pwd)/results":/opt/cav25-experiments/results \
-  dtpaynt-symbiotic ./experiments.sh --smoke-test --skip-omdt
+# 3. Run smoke test on original image
+mkdir results-original
+docker run -v="$(pwd)/results-original":/opt/cav25-experiments/results \
+  dtpaynt-original ./experiments.sh --smoke-test --skip-omdt
 
-# 4. Results appear in ./results/
+# 4. Run smoke test on symbiotic image (includes both standard + symbiotic)
+mkdir results-symbiotic
+docker run -v="$(pwd)/results-symbiotic":/opt/cav25-experiments/results \
+  dtpaynt-symbiotic ./experiments-with-symbiotic.sh --smoke-test --skip-omdt
+
+# 5. Results appear in ./results-original/ and ./results-symbiotic/
 ```
 
 Everything is self-contained in Docker - no setup needed!
@@ -212,25 +226,21 @@ Everything is self-contained in Docker - no setup needed!
 ### Both Versions (Original and Symbiotic)
 
 ```bash
-docker run dtpaynt-original python3 /opt/paynt/paynt.py <model> --method ar
-docker run dtpaynt-original python3 /opt/paynt/paynt.py <model> --method cegis
-docker run dtpaynt-original python3 /opt/paynt/paynt.py <model> --method hybrid
-docker run dtpaynt-original python3 /opt/paynt/paynt.py <model> --method ar_multicore
-docker run dtpaynt-original python3 /opt/paynt/paynt.py <model> --method onebyone
+docker run dtpaynt-original python3 /opt/paynt/paynt.py <model_dir> --method ar
+docker run dtpaynt-original python3 /opt/paynt/paynt.py <model_dir> --method cegis
+docker run dtpaynt-original python3 /opt/paynt/paynt.py <model_dir> --method hybrid
+docker run dtpaynt-original python3 /opt/paynt/paynt.py <model_dir> --method ar_multicore
+docker run dtpaynt-original python3 /opt/paynt/paynt.py <model_dir> --method onebyone
 ```
 
 ### Symbiotic Only (Modified Version)
 
 ```bash
-docker run dtpaynt-symbiotic python3 /opt/paynt/paynt.py <model> --method symbiotic
+docker run dtpaynt-symbiotic python3 /opt/paynt/paynt.py <model_dir> \
+  --sketch model-random.drn \
+  --props discounted.props \
+  --method symbiotic
 ```
-
-**Parameters for Symbiotic:**
-- `--dtcontrol-path TEXT` - Path to dtcontrol (default: "dtcontrol")
-- `--symbiotic-iterations INT` - Refinement iterations (default: 10)
-- `--symbiotic-subtree-depth INT` - Sub-tree depth target (default: 5)
-- `--symbiotic-error-tolerance FLOAT` - Max quality drop 0.0-1.0 (default: 0.01)
-- `--symbiotic-timeout INT` - Per-subproblem timeout seconds (default: 120)
 
 ---
 
@@ -240,13 +250,13 @@ docker run dtpaynt-symbiotic python3 /opt/paynt/paynt.py <model> --method symbio
 |------|------|---------|
 | Build original | 5-10 min | `docker build ... -t dtpaynt-original` |
 | Build symbiotic | 5-10 min | `docker build ... -t dtpaynt-symbiotic` |
-| Smoke test (original) | 3-5 min | `docker run ... dtpaynt-original ./experiments.sh --smoke-test --skip-omdt` |
-| Smoke test (symbiotic) | 3-5 min | `docker run ... dtpaynt-symbiotic ./experiments.sh --smoke-test --skip-omdt` |
+| Smoke test (original) | 5-10 min | `docker run ... dtpaynt-original ./experiments.sh --smoke-test --skip-omdt` |
+| Smoke test (symbiotic) | 5-10 min | `docker run ... dtpaynt-symbiotic ./experiments-with-symbiotic.sh --smoke-test --skip-omdt` |
 | Compare results | 1 min | `python3 compare_results.py ...` |
-| **Total for full smoke test** | **~30 mins** | |
+| **Total for full smoke test** | **~30-40 mins** | |
 | Subset experiments (original) | 30-60 min | `./experiments.sh --model-subset` |
-| Subset experiments (symbiotic) | 30-60 min | `./experiments.sh --model-subset` |
-| **Total for full suite** | **~2 hours** | |
+| Subset experiments (symbiotic) | 30-60 min | `./experiments-with-symbiotic.sh --model-subset` |
+| **Total for full suite** | **~2-3 hours** | |
 
 ---
 
@@ -270,254 +280,10 @@ See `LICENSE` files in `synthesis-original/` and `synthesis-modified/`
 
 ## Next: Detailed Technical Information
 
-👉 Read **`IMPLEMENTATION_DETAILS.md`** for:
+👉 Read **`IMPLEMENTATION_DETAILS.md`** and **`SYMBIOTIC_INTEGRATION_SUMMARY.md`** for:
 - Code changes explained
 - Test strategy
 - Algorithm deep-dive
 - Extension points
 - Performance notes
-
------
-
-# DTPAYNT Search Algorithm Extension
-
-This project contains a modified version of the DTPAYNT tool, originally provided as a supplement to the CAV'25 paper, "Small Decision Trees for MDPs with Deductive Synthesis".
-
-This repository is structured to manage two versions of the algorithm:
-
-1.  **The original Depth-First Search (DFS) algorithm.**
-2.  **Our modified Best-First Search (BFS) algorithm using a priority queue.**
-
-This README provides a complete guide to building the Docker environment for both versions, understanding our algorithmic improvements, and running experiments.
-
------
-
-## 1\. Setup and Build Instructions
-
-Follow these steps to build the Docker containers for both the original and modified algorithms.
-
-### Prerequisites
-
-  * **Docker**: Must be installed on your system.
-  * **This Git Repository**: You should have this repository cloned to your local machine.
-
-### Folder Structure
-
-This repository uses a two-folder approach to manage the different code versions. The `Dockerfile` is configured to build from either folder using a build argument. The structure is:
-
-```
-.
-├── Dockerfile
-├── synthesis-original/     <-- Contains the original DFS code
-└── synthesis-modified/     <-- Contains our new Best-First Search code
-```
-
-## Building Docker Images
-
-Navigate to the repository root and build the images:
-
-```bash
-# Build image with synthesis-modified (symbiotic synthesis included)
-docker build --build-arg SRC_FOLDER=synthesis-modified -t dtpaynt-symbiotic .
-
-# Build image with synthesis-original (original PAYNT)
-docker build --build-arg SRC_FOLDER=synthesis-original -t dtpaynt-original .
-```
-
-Both images are now ready for use.
-
-## Using the Symbiotic Synthesis Method
-
-The symbiotic synthesis method combines dtcontrol (fast tree generation) with DTPAYNT (optimal synthesis).
-
-### Basic Usage
-
-```bash
-# Run symbiotic synthesis on a model
-docker run dtpaynt-symbiotic \
-  python3 paynt.py /opt/cav25-experiments/models/dts-q4/consensus-4-2 \
-  --method symbiotic
-```
-
-### With Custom Parameters
-
-```bash
-docker run dtpaynt-symbiotic \
-  python3 paynt.py /opt/cav25-experiments/models/dts-q4/consensus-4-2 \
-  --method symbiotic \
-  --symbiotic-iterations 20 \
-  --symbiotic-subtree-depth 4 \
-  --symbiotic-error-tolerance 0.05 \
-  --symbiotic-timeout 180
-```
-
-### Symbiotic Synthesis Parameters
-
-- `--dtcontrol-path TEXT` - Path to dtcontrol executable (default: "dtcontrol")
-- `--symbiotic-iterations INTEGER` - Number of refinement iterations (default: 10)
-- `--symbiotic-subtree-depth INTEGER` - Depth of sub-trees to optimize (default: 5)
-- `--symbiotic-error-tolerance FLOAT` - Max performance degradation 0.0-1.0 (default: 0.01)
-- `--symbiotic-timeout INTEGER` - Timeout per DTPAYNT sub-problem in seconds (default: 120)
-
-### Run Symbiotic Tests
-
-```bash
-docker run dtpaynt-symbiotic pytest /opt/paynt/tests/test_symbiotic.py -v
-```
-
-## Running Experiments (Original PAYNT)
-
-### Smoke Test (Quick Verification)
-
-```bash
-docker run -v="$(pwd)/results":/opt/cav25-experiments/results \
-  dtpaynt-original ./experiments.sh --smoke-test --skip-omdt
-```
-
-### Full Benchmark Suite
-
-```bash
-docker run -v="$(pwd)/results":/opt/cav25-experiments/results \
-  dtpaynt-original ./experiments.sh --skip-omdt
-```
-
-### With Model Subset (Recommended)
-
-```bash
-docker run -v="$(pwd)/results":/opt/cav25-experiments/results \
-  dtpaynt-original ./experiments.sh --skip-omdt --model-subset
-```
-
-### With Gurobi (Optional)
-
-```bash
-docker run \
-  -v=/absolute/path/to/gurobi.lic:/opt/gurobi/gurobi.lic:ro \
-  -v="$(pwd)/results":/opt/cav25-experiments/results \
-  dtpaynt-original ./experiments.sh --smoke-test
-```
-
-## Accessing Results and Debugging
-
-### Results
-
-All generated logs, CSV files, and figures will appear in the `results` folder on your local machine.
-
-### Interactive Shell
-
-```bash
-# Explore the symbiotic synthesis version
-docker run -it dtpaynt-symbiotic bash
-
-# Explore the original version
-docker run -it dtpaynt-original bash
-```
-
-
-
-- **QUICK_REFERENCE.md** - Fast lookup guide for symbiotic synthesis
-- **README_SYMBIOTIC.md** - Complete user guide with examples
-- **SYMBIOTIC_IMPLEMENTATION.md** - Technical implementation details
-- **INDEX.md** - Navigation guide to all documentation
-
-## Key Innovations in Symbiotic Synthesis
-
-### The Challenge
-- **dtcontrol**: Fast but produces large, non-optimal trees
-- **DTPAYNT**: Finds small, optimal trees but can be slow on large problems
-
-### The Solution
-The symbiotic method combines both:
-1. **Phase 1**: Generate initial tree quickly using dtcontrol
-2. **Phase 2**: Iteratively select and optimize sub-trees using DTPAYNT
-3. **Phase 3**: Export and analyze results
-
-This gives you:
-- ✅ Speed of dtcontrol
-- ✅ Optimality of DTPAYNT
-- ✅ Quality guarantees through error tolerance mechanism
-- ✅ Flexible configuration for different tradeoffs
-
-## Running Experiments
-
-### Smoke Test with Modified Version (Symbiotic-enabled)
-```bash
-docker run -v="$(pwd)/results":/opt/cav25-experiments/results \
-  dtpaynt-symbiotic ./experiments.sh --smoke-test --skip-omdt
-```
-
-### Full Experiments with Modified Version
-```bash
-docker run -v="$(pwd)/results":/opt/cav25-experiments/results \
-  dtpaynt-symbiotic ./experiments.sh
-```
-
-### Smoke Test with Original Version
-```bash
-docker run -v="$(pwd)/results":/opt/cav25-experiments/results \
-  dtpaynt-original ./experiments.sh --smoke-test --skip-omdt
-```
-
-### Run Specific Symbiotic Synthesis on a Model
-```bash
-docker run -v="$(pwd)/models":/opt/models \
-  dtpaynt-symbiotic python3 /opt/paynt/paynt.py /opt/models/maze \
-  --method symbiotic \
-  --symbiotic-iterations 10 \
-  --symbiotic-subtree-depth 5
-```
-
-## Testing the Implementation
-
-### All Tests
-```bash
-docker run dtpaynt-symbiotic python3 -m pytest /opt/paynt/tests/ -v
-```
-
-### Just Symbiotic Tests
-```bash
-docker run dtpaynt-symbiotic python3 -m pytest /opt/paynt/tests/test_symbiotic.py -v
-```
-
-### With Coverage Report
-```bash
-docker run dtpaynt-symbiotic \
-  python3 -m pytest /opt/paynt/tests/test_symbiotic.py \
-  --cov=paynt.synthesizer.synthesizer_symbiotic \
-  --cov-report=term-missing
-```
-
-## Verification Checklist
-
-- [x] Symbiotic synthesis method implemented
-- [x] 5 new CLI parameters added
-- [x] 20+ tests included
-- [x] Docker support for both versions
-- [x] Comprehensive documentation
-- [x] Mock dtcontrol for testing
-- [x] Error handling and logging
-- [x] Backward compatibility maintained
-
-## Support and Troubleshooting
-
-### "dtcontrol: command not found"
-dtcontrol is installed in the container. Use `--dtcontrol-path dtcontrol` (the default).
-
-### "Synthesis timeout"
-Increase `--symbiotic-timeout` parameter (default is 120 seconds).
-
-### "Memory issues"
-Reduce `--symbiotic-subtree-depth` or `--symbiotic-iterations`.
-
-### "Tests not running"
-Make sure you're using the `dtpaynt-symbiotic` image which includes test dependencies.
-
-## Additional Resources
-
-- Original PAYNT Paper: CAV'25 - "Small Decision Trees for MDPs with Deductive Synthesis"
-- dtcontrol: https://gitlab.com/live-lab/software/dtcontrol
-- Storm: https://www.stormchecker.org/
-
-## License
-
-See LICENSE file in synthesis-modified directory.
+- All root causes and fixes
