@@ -225,6 +225,10 @@ class SynthesizerSymbiotic(paynt.synthesizer.synthesizer.Synthesizer):
                 tree = self._parse_dot_file(output_dot)
                 return tree
                 
+            except Exception as e:
+                # dtcontrol failed - log and return None to trigger fallback
+                logger.warning(f"dtcontrol tree generation failed: {e}")
+                return None
             finally:
                 # Clean up temporary files
                 shutil.rmtree(temp_dir, ignore_errors=True)
@@ -325,7 +329,7 @@ class SynthesizerSymbiotic(paynt.synthesizer.synthesizer.Synthesizer):
             result_wrapper = self.dtcontrol.generate_tree_from_scheduler(scheduler_json_str, preset="default")
             
             if not result_wrapper.success:
-                logger.error(f"dtcontrol failed: {result_wrapper.error_msg}")
+                logger.warning(f"dtcontrol failed: {result_wrapper.error_msg}")
                 raise RuntimeError(f"dtcontrol failed: {result_wrapper.error_msg}")
             
             # Validate the result
