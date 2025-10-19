@@ -24,14 +24,16 @@ docker build --build-arg SRC_FOLDER=synthesis-modified -t dtpaynt-symbiotic .
 ### Step 2: Run Smoke Test (5 Models, ~5 mins each)
 
 ```bash
-# Original
+# Original (AR, CEGIS, Hybrid methods)
 docker run -v="$(pwd)/results-original-smoke":/opt/cav25-experiments/results \
   dtpaynt-original ./experiments.sh --smoke-test --skip-omdt
 
-# Symbiotic  
+# Symbiotic (AR, CEGIS, Hybrid + NEW Symbiotic synthesis)
 docker run -v="$(pwd)/results-symbiotic-smoke":/opt/cav25-experiments/results \
-  dtpaynt-symbiotic ./experiments.sh --smoke-test --skip-omdt
+  dtpaynt-symbiotic ./experiments-with-symbiotic.sh --smoke-test --skip-omdt
 ```
+
+**Note**: Use `experiments-with-symbiotic.sh` for the symbiotic version to automatically run both standard methods AND symbiotic synthesis on each model.
 
 ### Step 3: Run Subset Tests (Full Benchmark Suite)
 
@@ -40,10 +42,12 @@ docker run -v="$(pwd)/results-symbiotic-smoke":/opt/cav25-experiments/results \
 docker run -v="$(pwd)/results-original":/opt/cav25-experiments/results \
   dtpaynt-original ./experiments.sh --model-subset
 
-# Symbiotic
+# Symbiotic (includes symbiotic synthesis on all models)
 docker run -v="$(pwd)/results-symbiotic":/opt/cav25-experiments/results \
-  dtpaynt-symbiotic ./experiments.sh --model-subset
+  dtpaynt-symbiotic ./experiments-with-symbiotic.sh --model-subset
 ```
+
+**Note**: The symbiotic version runs both standard methods (AR, CEGIS, Hybrid) AND symbiotic synthesis, organizing results in separate directories.
 
 ### Step 4: Compare Results
 
