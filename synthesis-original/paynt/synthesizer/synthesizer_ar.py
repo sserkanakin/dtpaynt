@@ -125,8 +125,10 @@ class SynthesizerAR(paynt.synthesizer.synthesizer.Synthesizer):
                 break
             family = families.pop(-1)
 
-            print(f"[Depth-First] Iteration {iteration_count}, Processing family: {family}")
             iteration_count += 1
+            # Only print every 100 iterations to reduce verbosity
+            if iteration_count % 100 == 0:
+                print(f"[Depth-First] Iteration {iteration_count}")
             
             self.verify_family(family)
             self.update_optimum(family)
