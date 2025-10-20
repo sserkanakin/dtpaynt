@@ -167,3 +167,7 @@ tmp/
 # Backup files
 *.bak
 *.backup
+results-tree-export/3d_navigation.dot
+results-tree-export/3d_navigation.png
+results-tree-export/system_administrator_tree.dot
+results-tree-export/system_administrator_tree.png
