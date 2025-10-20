@@ -6,11 +6,18 @@
 
 FROM randriu/paynt:cav25
 
+# Install pytest for testing
+RUN pip install pytest
+
 # ARG defines a build-time variable with a default value. It must be
 # declared after the final FROM to be available to later instructions like COPY.
 ARG SRC_FOLDER=synthesis
 
-# Copy the specified source folder and reinstall it
+# Copy BOTH synthesis directories for testing comparison
+COPY ./synthesis-modified /opt/synthesis-modified
+COPY ./synthesis-original /opt/synthesis-original
+
+# Install the specified source folder as the main installation
 COPY ./${SRC_FOLDER} /opt/paynt
 WORKDIR /opt/paynt
 RUN pip install .

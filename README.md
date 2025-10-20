@@ -125,7 +125,67 @@ Bash
 docker run -v=/absolute/path/to/your/gurobi.lic:/opt/gurobi/gurobi.lic:ro -v="$(pwd)/results_modified":/opt/cav25-experiments/results -it dtpaynt-dev ./experiments.sh --smoke-test
 ```
 
-## 4. Accessing Results and Debugging
+## 4. Running Priority Search Comparison Tests
+
+To verify and compare the performance of the original stack-based search against the new priority-queue-based search, we provide automated tests.
+
+### Quick Test (Recommended)
+
+Simply run the provided test script:
+
+```bash
+./run_tests_docker.sh
+```
+
+This script will:
+1. Build a Docker image with both synthesis versions
+2. Run comprehensive comparison tests
+3. Display side-by-side performance metrics
+
+### Manual Docker Test
+
+If you prefer to run tests manually:
+
+```bash
+# Build the test image
+docker build -t dtpaynt-better-value --build-arg SRC_FOLDER=synthesis-modified .
+
+# Run the comparison tests
+docker run --rm dtpaynt-better-value \
+    bash -c "cd /opt/synthesis-modified && python tests/test_priority_search_comparison_docker.py"
+```
+
+### Local Test (Without Docker)
+
+If you have PAYNT installed locally:
+
+```bash
+cd synthesis-modified
+pytest tests/test_priority_search_comparison.py -v -s
+```
+
+### Test Output
+
+The tests will show:
+- Iteration-by-iteration priority queue processing logs
+- Performance comparison tables (Time, Value, Tree Size, Iterations)
+- Verification that modified algorithm ≥ original algorithm in solution quality
+
+Example output:
+```
+================================================================================
+COMPARISON RESULTS: Simple MDP
+================================================================================
+Algorithm                      Time (s)        Value           Tree Size       Iterations     
+--------------------------------------------------------------------------------
+Original (Stack)               0.1234          9.8765          12              45             
+Modified (Priority-Q)          0.0987          9.8765          12              38             
+
+Time improvement: +20.00%
+Value improvement: +0.00%
+```
+
+## 5. Accessing Results and Debugging
 Results: All generated logs, .csv files, and figures will appear in the respective results folders (e.g., results_original, results_modified_subset) on your local machine.
 
 Interactive Shell: If you need to debug or explore a container's file system, use the appropriate image name:

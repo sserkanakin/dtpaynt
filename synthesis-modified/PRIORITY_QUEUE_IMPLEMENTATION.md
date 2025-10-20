@@ -32,6 +32,13 @@ This document provides a quick reference for the heuristic-guided priority queue
 
 ## Running Tests
 
+### Docker (Recommended)
+```bash
+cd /Users/serkan/Projects/FML/dtpaynt
+./run_tests_docker.sh
+```
+
+### Local
 ```bash
 cd /Users/serkan/Projects/FML/dtpaynt/synthesis-modified
 pytest tests/test_priority_search_comparison.py -v -s

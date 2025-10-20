@@ -15,7 +15,7 @@ WORKDIR /opt/
 # install dependencies
 RUN apt-get update -qq
 RUN apt-get install -y graphviz
-RUN pip install click z3-solver psutil graphviz
+RUN pip install click z3-solver psutil graphviz pytest
 
 # build paynt
 WORKDIR /opt/paynt
@@ -27,3 +27,6 @@ WORKDIR /opt/paynt
 
 # (optional) install paynt
 RUN pip install -e .
+
+# Set PYTHONPATH to ensure both synthesis directories are accessible
+ENV PYTHONPATH="/opt/paynt:${PYTHONPATH}"

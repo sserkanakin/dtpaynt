@@ -369,11 +369,35 @@ The core changes are in `paynt/synthesizer/synthesizer_ar.py`:
 
 ### Running Comparison Tests
 
-To compare the performance of the original stack-based search against the new priority-queue-based search, run:
+#### Local Testing
+
+To compare the performance of the original stack-based search against the new priority-queue-based search locally, run:
 
 ```shell
 pytest tests/test_priority_search_comparison.py -v -s
 ```
+
+#### Docker Testing
+
+To run the tests inside a Docker container (recommended for consistent environment):
+
+```shell
+# From the dtpaynt root directory
+./run_tests_docker.sh
+```
+
+Or manually:
+
+```shell
+# Build the Docker image
+docker build -t dtpaynt-better-value --build-arg SRC_FOLDER=synthesis-modified .
+
+# Run the tests
+docker run --rm dtpaynt-better-value \
+    bash -c "cd /opt/synthesis-modified && python tests/test_priority_search_comparison_docker.py"
+```
+
+#### What the Tests Do
 
 This test file:
 - Imports both the **original** synthesizer from `synthesis-original` and the **modified** synthesizer from `synthesis-modified`
