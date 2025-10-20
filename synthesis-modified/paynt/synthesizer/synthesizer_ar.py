@@ -112,7 +112,16 @@ class SynthesizerAR(paynt.synthesizer.synthesizer.Synthesizer):
         self.quotient.specification.optimality.update_optimum(iv)
         self.best_assignment = ia
         self.best_assignment_value = iv
-        logger.info(f"value {round(iv,4)} achieved after {round(paynt.utils.timer.GlobalTimer.read(),2)} seconds")
+        
+        # Safely log with timer check
+        elapsed_time = 0
+        try:
+            if paynt.utils.timer.GlobalTimer.global_timer is not None:
+                elapsed_time = paynt.utils.timer.GlobalTimer.read()
+        except:
+            pass
+        
+        logger.info(f"value {round(iv,4)} achieved after {round(elapsed_time,2)} seconds")
         if isinstance(self.quotient, paynt.quotient.pomdp.PomdpQuotient):
             self.stat.new_fsc_found(family.analysis_result.improving_value, ia, self.quotient.policy_size(ia))
 

@@ -11,7 +11,7 @@ RUN pip install pytest
 
 # ARG defines a build-time variable with a default value. It must be
 # declared after the final FROM to be available to later instructions like COPY.
-ARG SRC_FOLDER=synthesis
+ARG SRC_FOLDER=synthesis-modified
 
 # Copy BOTH synthesis directories for testing comparison
 COPY ./synthesis-modified /opt/synthesis-modified
