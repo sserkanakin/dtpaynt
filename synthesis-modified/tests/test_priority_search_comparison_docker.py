@@ -32,21 +32,35 @@ print(f"[DEBUG] ModifiedSynthesizerAR loaded from: {modified_synthesizer_ar.__fi
 ModifiedSynthesizerAR = modified_synthesizer_ar.SynthesizerAR
 modified_parse_sketch = modified_sketch.Sketch.load_sketch
 
-# Clear ALL paynt modules to force clean reimport
+# We need to load from different directories, but Python's import system makes this tricky
+# Solution: Use subprocess to run each synthesizer in isolation
+# For now, let's use a simpler approach - verify the classes are actually different
+
+import importlib
+
+# Clear ALL paynt modules to force clean reimport  
 sys.path.remove(str(project_root / "synthesis-modified"))
 modules_to_remove = [key for key in sys.modules.keys() if key.startswith('paynt')]
 for module in modules_to_remove:
     sys.modules.pop(module, None)
 
-# Re-insert original at the front
+# Re-insert original at the front - this MUST be the only paynt in path
 sys.path.insert(0, str(project_root / "synthesis-original"))
 
-# Import original versions - these should now come from synthesis-original
+# Force reimport with importlib
 import paynt.parser.sketch as original_sketch
 import paynt.synthesizer.synthesizer_ar as original_synthesizer_ar
 
 # Verify we got the right version
 print(f"[DEBUG] OriginalSynthesizerAR loaded from: {original_synthesizer_ar.__file__}")
+print(f"[DEBUG] OriginalSynthesizerAR class id: {id(original_synthesizer_ar.SynthesizerAR)}")
+print(f"[DEBUG] ModifiedSynthesizerAR class id: {id(ModifiedSynthesizerAR)}")
+
+# Check if they're the same class (they shouldn't be!)
+if original_synthesizer_ar.SynthesizerAR is ModifiedSynthesizerAR:
+    print("[WARNING] Both classes are THE SAME! Import isolation failed!")
+else:
+    print("[OK] Classes are different - import isolation successful")
 
 OriginalSynthesizerAR = original_synthesizer_ar.SynthesizerAR
 original_parse_sketch = original_sketch.Sketch.load_sketch
@@ -92,9 +106,13 @@ def get_complex_sketch_paths():
     return sketch_path, props_path
 
 
-def run_synthesis(synthesizer_class, sketch_path, props_path, max_timeout=30):
+def run_synthesis(synthesizer_class, sketch_path, props_path, max_timeout=30, label=None):
     """Run synthesis with the given synthesizer class."""
     try:
+        # Determine label based on class identity
+        if label is None:
+            label = "OriginalSynthesizerAR" if synthesizer_class == OriginalSynthesizerAR else "ModifiedSynthesizerAR"
+        
         # Load the sketch
         if synthesizer_class == OriginalSynthesizerAR:
             quotient = original_parse_sketch(sketch_path, props_path)
@@ -128,12 +146,13 @@ def run_synthesis(synthesizer_class, sketch_path, props_path, max_timeout=30):
             value = synthesizer.best_assignment_value
         
         # Debug output
-        print(f"[DEBUG] Synthesis completed:")
-        print(f"  - Assignment: {assignment is not None}")
-        print(f"  - Has best_assignment_value: {hasattr(synthesizer, 'best_assignment_value')}")
-        print(f"  - Value: {value}")
-        if hasattr(synthesizer, 'best_assignment'):
-            print(f"  - best_assignment: {synthesizer.best_assignment is not None}")
+        print(f"[DEBUG {label}] Synthesis completed:")
+        print(f"  - Assignment returned: {assignment is not None}")
+        print(f"  - best_assignment: {synthesizer.best_assignment is not None if hasattr(synthesizer, 'best_assignment') else 'N/A'}")
+        print(f"  - best_assignment_value: {value}")
+        print(f"  - Spec has_optimality: {synthesizer.quotient.specification.has_optimality if hasattr(synthesizer, 'quotient') else 'N/A'}")
+        if hasattr(synthesizer, 'stat') and synthesizer.stat:
+            print(f"  - Families explored: {synthesizer.explored if hasattr(synthesizer, 'explored') else 'N/A'}")
         
         tree_size = 0
         if assignment is not None and hasattr(assignment, '__len__'):
@@ -144,7 +163,7 @@ def run_synthesis(synthesizer_class, sketch_path, props_path, max_timeout=30):
             iterations = synthesizer.stat.iterations
         
         return BenchmarkResult(
-            name=synthesizer_class.__name__,
+            name=label,  # Use the explicit label instead of class name
             time_taken=time_taken,
             value=value,
             tree_size=tree_size,
