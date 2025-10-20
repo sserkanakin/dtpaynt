@@ -129,10 +129,8 @@ def test_basic_coin_model():
         "Original"
     )
     
-    # Reset timer
-    if paynt.utils.timer.GlobalTimer.global_timer is not None:
-        paynt.utils.timer.GlobalTimer.stop()
-        paynt.utils.timer.GlobalTimer.global_timer = None
+    # Reset timer for next run
+    paynt.utils.timer.GlobalTimer.global_timer = None
     
     # Run modified
     print("[2/2] Running MODIFIED (Priority Queue)...")
@@ -200,10 +198,8 @@ def test_maze_model_shallow_tree():
         "Original"
     )
     
-    # Reset timer
-    if paynt.utils.timer.GlobalTimer.global_timer is not None:
-        paynt.utils.timer.GlobalTimer.stop()
-        paynt.utils.timer.GlobalTimer.global_timer = None
+    # Reset timer for next run
+    paynt.utils.timer.GlobalTimer.global_timer = None
     
     # Run modified
     print("[2/2] Running MODIFIED (Priority Queue)...")
@@ -283,10 +279,8 @@ def test_grid_model_satisfiability():
         "Original"
     )
     
-    # Reset timer
-    if paynt.utils.timer.GlobalTimer.global_timer is not None:
-        paynt.utils.timer.GlobalTimer.stop()
-        paynt.utils.timer.GlobalTimer.global_timer = None
+    # Reset timer for next run
+    paynt.utils.timer.GlobalTimer.global_timer = None
     
     # Run modified
     print("[2/2] Running MODIFIED (Priority Queue)...")
