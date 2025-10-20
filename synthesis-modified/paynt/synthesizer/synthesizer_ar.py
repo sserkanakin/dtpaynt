@@ -129,6 +129,11 @@ class SynthesizerAR(paynt.synthesizer.synthesizer.Synthesizer):
 
         iteration = 0
         while families:
+            # Check resource limits (timeout, memory)
+            if self.resource_limit_reached():
+                logger.info("Resource limit reached, stopping synthesis")
+                break
+                
             iteration += 1
             # Only print every 100 iterations to reduce verbosity
             if iteration % 100 == 0:

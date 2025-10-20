@@ -127,6 +127,14 @@ def run_synthesis(synthesizer_class, sketch_path, props_path, max_timeout=30):
         if hasattr(synthesizer, 'best_assignment_value'):
             value = synthesizer.best_assignment_value
         
+        # Debug output
+        print(f"[DEBUG] Synthesis completed:")
+        print(f"  - Assignment: {assignment is not None}")
+        print(f"  - Has best_assignment_value: {hasattr(synthesizer, 'best_assignment_value')}")
+        print(f"  - Value: {value}")
+        if hasattr(synthesizer, 'best_assignment'):
+            print(f"  - best_assignment: {synthesizer.best_assignment is not None}")
+        
         tree_size = 0
         if assignment is not None and hasattr(assignment, '__len__'):
             tree_size = len(assignment)
@@ -158,13 +166,15 @@ def test_simple_mdp_comparison():
     # Get paths to existing sketch files
     sketch_path, props_path = get_simple_sketch_paths()
     
+    # Run modified synthesizer
+    print("\nRunning MODIFIED (Priority-Queue-Based) Synthesizer...")
+    modified_result = run_synthesis(ModifiedSynthesizerAR, sketch_path, props_path, max_timeout=5000)
+
     # Run original synthesizer
     print("\nRunning ORIGINAL (Stack-Based) Synthesizer...")
     original_result = run_synthesis(OriginalSynthesizerAR, sketch_path, props_path, max_timeout=1000)
     
-    # Run modified synthesizer
-    print("\nRunning MODIFIED (Priority-Queue-Based) Synthesizer...")
-    modified_result = run_synthesis(ModifiedSynthesizerAR, sketch_path, props_path, max_timeout=1000)
+    
     
     # Print comparison
     print_comparison_table([original_result, modified_result], "Simple Sketch")
