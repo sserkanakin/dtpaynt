@@ -353,3 +353,54 @@ python3 -m pytest --cov=./../paynt/ --cov-report term-missing test_synthesis.py 
 ```
 This command prints the coverage report, displaying the resulting coverage for individual source files.
 Our tests currently cover more than `90%` of the source code lines, even though the result shows `82%` because `~10%` of the source code is only temporary functions for debugging purposes that have no functionality.
+
+
+## Comparing Search Strategies
+
+This modified version of PAYNT implements a **heuristic-guided priority queue search** as an extension to the standard DTPAYNT algorithm. The key modification replaces the original stack-based (LIFO/depth-first) search with a priority queue-based search that prioritizes families of decision trees more likely to yield high-value policies.
+
+### Key Modifications
+
+The core changes are in `paynt/synthesizer/synthesizer_ar.py`:
+
+1. **Priority Queue Implementation**: Uses Python's `heapq` module to maintain a min-heap of families, ordered by priority.
+2. **Heuristic-Based Prioritization**: Uses the optimal policy value V*(σ) from the parent family as a heuristic to prioritize subfamilies. Higher values get higher priority (achieved by negating values since `heapq` is a min-heap).
+3. **Enhanced Logging**: Detailed logging shows iteration count, priority values, and family representations during the search process.
+
+### Running Comparison Tests
+
+To compare the performance of the original stack-based search against the new priority-queue-based search, run:
+
+```shell
+pytest tests/test_priority_search_comparison.py -v -s
+```
+
+This test file:
+- Imports both the **original** synthesizer from `synthesis-original` and the **modified** synthesizer from `synthesis-modified`
+- Creates representative MDP benchmark models programmatically
+- Runs both synthesizers on each benchmark
+- Measures and compares:
+  - Time to find the optimal solution
+  - Final optimal value achieved
+  - Decision tree size (number of nodes)
+  - Number of iterations
+- Prints a formatted comparison table showing side-by-side metrics
+
+The tests validate that the modified algorithm finds solutions with optimal values greater than or equal to the original algorithm, while potentially offering performance improvements through better search prioritization.
+
+### Expected Benefits
+
+The priority queue approach can offer:
+- **Faster convergence** to optimal solutions by exploring promising families first
+- **Better anytime performance** when running under time constraints
+- **More efficient search** in large design spaces with clear value gradients
+
+Sample log output from the priority queue search:
+```
+[Priority-Queue Search] Iteration 0, Processing family with priority 0
+[Priority-Queue Search] Iteration 1, Processing family with priority -0.85
+[Priority-Queue Search] Iteration 2, Processing family with priority -0.92
+[Priority-Queue Search] Iteration 3, Processing family with priority -0.95
+```
+
+````

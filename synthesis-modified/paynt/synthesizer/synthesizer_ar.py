@@ -3,6 +3,7 @@ import paynt.synthesizer.synthesizer
 import paynt.quotient.pomdp
 import paynt.verification.property_result
 
+import heapq
 import logging
 logger = logging.getLogger(__name__)
 
@@ -116,16 +117,28 @@ class SynthesizerAR(paynt.synthesizer.synthesizer.Synthesizer):
             self.stat.new_fsc_found(family.analysis_result.improving_value, ia, self.quotient.policy_size(ia))
 
     def synthesize_one(self, family):
-        families = [family]
+        # Initialize priority queue with the root family
+        # Using heapq min-heap, so we negate values to prioritize higher values
+        # Format: (priority, counter, family) where counter ensures FIFO for same priorities
+        families = []
+        counter = 0
+        
+        # Initial family gets priority 0 (highest priority since we negate values)
+        heapq.heappush(families, (0, counter, family))
+        counter += 1
 
         iteration_count = 0
 
         while families:
             if self.resource_limit_reached():
                 break
-            family = families.pop(-1)
-
-            print(f"[Depth-First] Iteration {iteration_count}, Processing family: {family}")
+            
+            # Pop family with highest priority (lowest negated value)
+            priority, _, family = heapq.heappop(families)
+            
+            # Log the priority queue processing
+            logger.info(f"[Priority-Queue Search] Iteration {iteration_count}, Processing family with priority {priority}: {family}")
+            print(f"[Priority-Queue Search] Iteration {iteration_count}, Processing family with priority {priority}")
             iteration_count += 1
             
             self.verify_family(family)
@@ -138,5 +151,21 @@ class SynthesizerAR(paynt.synthesizer.synthesizer.Synthesizer):
                 continue
             # undecided
             subfamilies = self.quotient.split(family)
-            families = families + subfamilies
+            
+            # Add subfamilies to priority queue with heuristic-based priorities
+            for subfamily in subfamilies:
+                # Use parent's improving_value as heuristic (if available)
+                # Otherwise use a default priority
+                if (hasattr(family.analysis_result, 'improving_value') and 
+                    family.analysis_result.improving_value is not None):
+                    # Negate the value since heapq is a min-heap and we want max priority
+                    subfamily_priority = -family.analysis_result.improving_value
+                else:
+                    # Default priority for families without improving_value
+                    subfamily_priority = 0
+                
+                heapq.heappush(families, (subfamily_priority, counter, subfamily))
+                counter += 1
+                logger.debug(f"  Added subfamily with priority {subfamily_priority}")
+                
         return self.best_assignment
