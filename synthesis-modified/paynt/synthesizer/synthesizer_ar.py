@@ -127,19 +127,14 @@ class SynthesizerAR(paynt.synthesizer.synthesizer.Synthesizer):
         heapq.heappush(families, (0, counter, family))
         counter += 1
 
-        iteration_count = 0
-
+        iteration = 0
         while families:
-            if self.resource_limit_reached():
-                break
+            iteration += 1
+            # Only print every 100 iterations to reduce verbosity
+            if iteration % 100 == 0:
+                print(f"[Priority-Queue Search] Iteration {iteration}")
             
-            # Pop family with highest priority (lowest negated value)
-            priority, _, family = heapq.heappop(families)
-            
-            # Log the priority queue processing
-            logger.info(f"[Priority-Queue Search] Iteration {iteration_count}, Processing family with priority {priority}: {family}")
-            print(f"[Priority-Queue Search] Iteration {iteration_count}, Processing family with priority {priority}")
-            iteration_count += 1
+            priority, _counter, family = heapq.heappop(families)
             
             self.verify_family(family)
             self.update_optimum(family)

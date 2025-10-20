@@ -51,99 +51,40 @@ class BenchmarkResult:
         self.iterations = iterations
 
 
-def create_simple_mdp_model():
-    """Create a simple MDP model for testing."""
-    model_content = """mdp
-
-module simple
-    s : [0..5] init 0;
-    
-    [act1] s=0 -> 0.7:(s'=1) + 0.3:(s'=2);
-    [act2] s=0 -> 0.5:(s'=1) + 0.5:(s'=2);
-    
-    [act1] s=1 -> 0.8:(s'=3) + 0.2:(s'=4);
-    [act2] s=1 -> 0.6:(s'=3) + 0.4:(s'=4);
-    
-    [act1] s=2 -> 0.9:(s'=3) + 0.1:(s'=5);
-    [act2] s=2 -> 0.4:(s'=4) + 0.6:(s'=5);
-    
-    [done] s=3 -> true;
-    [done] s=4 -> true;
-    [done] s=5 -> true;
-endmodule
-
-formula goal = s=3;
-
-rewards "reward"
-    s=3 : 10;
-    s=4 : 5;
-    s=5 : 1;
-endrewards
-"""
-    
-    properties_content = """Rmax=? [F goal]"""
-    
-    return model_content, properties_content
+def get_simple_sketch_paths():
+    """Get paths to a simple sketch model with holes."""
+    base_path = Path(__file__).parent.parent / 'models' / 'dtmc' / 'grid' / 'grid'
+    sketch_path = str(base_path / 'sketch.templ')
+    props_path = str(base_path / 'easy.props')
+    return sketch_path, props_path
 
 
-def create_grid_mdp_model():
-    """Create a more complex grid-based MDP model."""
-    model_content = """mdp
-
-module grid
-    x : [0..4] init 0;
-    y : [0..4] init 0;
-    
-    // Movement from start position
-    [north] x=0 & y=0 -> 0.8:(y'=1) + 0.2:(x'=1);
-    [south] x=0 & y=0 -> true;
-    [east]  x=0 & y=0 -> 0.8:(x'=1) + 0.2:(y'=1);
-    [west]  x=0 & y=0 -> true;
-    
-    // General movement rules (simplified for demonstration)
-    [north] x>0 & y<4 & !(x=4 & y=4) -> 0.8:(y'=min(y+1,4)) + 0.1:(x'=max(x-1,0)) + 0.1:(x'=min(x+1,4));
-    [south] x>0 & y>0 & !(x=4 & y=4) -> 0.8:(y'=max(y-1,0)) + 0.1:(x'=max(x-1,0)) + 0.1:(x'=min(x+1,4));
-    [east]  x<4 & y>0 & !(x=4 & y=4) -> 0.8:(x'=min(x+1,4)) + 0.1:(y'=max(y-1,0)) + 0.1:(y'=min(y+1,4));
-    [west]  x>0 & y>0 & !(x=4 & y=4) -> 0.8:(x'=max(x-1,0)) + 0.1:(y'=max(y-1,0)) + 0.1:(y'=min(y+1,4));
-    
-    // Goal state
-    [done] x=4 & y=4 -> true;
-endmodule
-
-formula goal = x=4 & y=4;
-
-rewards "steps"
-    !(x=4 & y=4) : 1;
-endrewards
-
-rewards "goal_reward"
-    x=4 & y=4 : 100;
-endrewards
-"""
-    
-    properties_content = """Rmax=? [F goal]"""
-    
-    return model_content, properties_content
+def get_complex_sketch_paths():
+    """Get paths to a more complex sketch model with holes."""
+    base_path = Path(__file__).parent.parent / 'models' / 'dtmc' / 'grid' / 'safety'
+    sketch_path = str(base_path / 'sketch.templ')
+    props_path = str(base_path / 'sketch.props')
+    return sketch_path, props_path
 
 
 def run_synthesis(synthesizer_class, sketch_path, props_path, max_timeout=30):
     """Run synthesis with the given synthesizer class."""
     try:
-        # Reset the global timer
-        paynt.utils.timer.GlobalTimer.reset()
-        
         # Load the sketch
         if synthesizer_class == OriginalSynthesizerAR:
-            sketch = original_parse_sketch(sketch_path, props_path)
+            quotient = original_parse_sketch(sketch_path, props_path)
         else:
-            sketch = modified_parse_sketch(sketch_path, props_path)
+            quotient = modified_parse_sketch(sketch_path, props_path)
         
-        # Create quotient and synthesizer
-        quotient = sketch.quotient
-        synthesizer = synthesizer_class.choose_synthesizer(quotient)
+        # Initialize family constraint indices if not set
+        if quotient.family.constraint_indices is None:
+            quotient.family.constraint_indices = list(range(len(quotient.specification.constraints)))
+        
+        # Create synthesizer directly
+        synthesizer = synthesizer_class(quotient)
         
         # Set timeout
-        synthesizer.timeout = max_timeout
+        synthesizer.timeout = max_timeout if max_timeout else None
         
         # Run synthesis
         start_time = time.time()
@@ -180,77 +121,59 @@ def run_synthesis(synthesizer_class, sketch_path, props_path, max_timeout=30):
 
 
 def test_simple_mdp_comparison():
-    """Test and compare both synthesizers on a simple MDP model."""
+    """Test and compare both synthesizers on a simple sketch with holes."""
     print("\n" + "="*80)
-    print("TEST 1: Simple MDP Model Comparison")
+    print("TEST 1: Simple Sketch Model Comparison (Grid with holes)")
     print("="*80)
     
-    # Create temporary files for the model
-    with tempfile.TemporaryDirectory() as tmpdir:
-        sketch_path = os.path.join(tmpdir, "sketch.templ")
-        props_path = os.path.join(tmpdir, "sketch.props")
-        
-        model_content, props_content = create_simple_mdp_model()
-        
-        with open(sketch_path, 'w') as f:
-            f.write(model_content)
-        with open(props_path, 'w') as f:
-            f.write(props_content)
-        
-        # Run original synthesizer
-        print("\nRunning ORIGINAL (Stack-Based) Synthesizer...")
-        original_result = run_synthesis(OriginalSynthesizerAR, sketch_path, props_path)
-        
-        # Run modified synthesizer
-        print("\nRunning MODIFIED (Priority-Queue-Based) Synthesizer...")
-        modified_result = run_synthesis(ModifiedSynthesizerAR, sketch_path, props_path)
-        
-        # Print comparison
-        print_comparison_table([original_result, modified_result], "Simple MDP")
-        
-        # Assertions
-        if original_result and modified_result:
-            assert modified_result.value is not None, "Modified synthesizer should find a solution"
-            if original_result.value is not None:
-                assert modified_result.value >= original_result.value * 0.99, \
-                    f"Modified value {modified_result.value} should be >= original value {original_result.value}"
+    # Get paths to existing sketch files
+    sketch_path, props_path = get_simple_sketch_paths()
+    
+    # Run original synthesizer
+    print("\nRunning ORIGINAL (Stack-Based) Synthesizer...")
+    original_result = run_synthesis(OriginalSynthesizerAR, sketch_path, props_path, max_timeout=60)
+    
+    # Run modified synthesizer
+    print("\nRunning MODIFIED (Priority-Queue-Based) Synthesizer...")
+    modified_result = run_synthesis(ModifiedSynthesizerAR, sketch_path, props_path, max_timeout=60)
+    
+    # Print comparison
+    print_comparison_table([original_result, modified_result], "Simple Sketch")
+    
+    # Assertions
+    if original_result and modified_result:
+        assert modified_result.value is not None, "Modified synthesizer should find a solution"
+        if original_result.value is not None:
+            assert modified_result.value >= original_result.value * 0.99, \
+                f"Modified value {modified_result.value} should be >= original value {original_result.value}"
 
 
 def test_grid_mdp_comparison():
-    """Test and compare both synthesizers on a grid MDP model."""
+    """Test and compare both synthesizers on a more complex sketch with holes."""
     print("\n" + "="*80)
-    print("TEST 2: Grid MDP Model Comparison")
+    print("TEST 2: Complex Sketch Model Comparison (Grid Safety)")
     print("="*80)
     
-    # Create temporary files for the model
-    with tempfile.TemporaryDirectory() as tmpdir:
-        sketch_path = os.path.join(tmpdir, "sketch.templ")
-        props_path = os.path.join(tmpdir, "sketch.props")
-        
-        model_content, props_content = create_grid_mdp_model()
-        
-        with open(sketch_path, 'w') as f:
-            f.write(model_content)
-        with open(props_path, 'w') as f:
-            f.write(props_content)
-        
-        # Run original synthesizer
-        print("\nRunning ORIGINAL (Stack-Based) Synthesizer...")
-        original_result = run_synthesis(OriginalSynthesizerAR, sketch_path, props_path, max_timeout=60)
-        
-        # Run modified synthesizer
-        print("\nRunning MODIFIED (Priority-Queue-Based) Synthesizer...")
-        modified_result = run_synthesis(ModifiedSynthesizerAR, sketch_path, props_path, max_timeout=60)
-        
-        # Print comparison
-        print_comparison_table([original_result, modified_result], "Grid MDP")
-        
-        # Assertions
-        if original_result and modified_result:
-            assert modified_result.value is not None, "Modified synthesizer should find a solution"
-            if original_result.value is not None:
-                assert modified_result.value >= original_result.value * 0.99, \
-                    f"Modified value {modified_result.value} should be >= original value {original_result.value}"
+    # Get paths to existing sketch files
+    sketch_path, props_path = get_complex_sketch_paths()
+    
+    # Run original synthesizer
+    print("\nRunning ORIGINAL (Stack-Based) Synthesizer...")
+    original_result = run_synthesis(OriginalSynthesizerAR, sketch_path, props_path, max_timeout=120)
+    
+    # Run modified synthesizer
+    print("\nRunning MODIFIED (Priority-Queue-Based) Synthesizer...")
+    modified_result = run_synthesis(ModifiedSynthesizerAR, sketch_path, props_path, max_timeout=120)
+    
+    # Print comparison
+    print_comparison_table([original_result, modified_result], "Complex Sketch")
+    
+    # Assertions
+    if original_result and modified_result:
+        assert modified_result.value is not None, "Modified synthesizer should find a solution"
+        if original_result.value is not None:
+            assert modified_result.value >= original_result.value * 0.99, \
+                f"Modified value {modified_result.value} should be >= original value {original_result.value}"
 
 
 def print_comparison_table(results, model_name):
