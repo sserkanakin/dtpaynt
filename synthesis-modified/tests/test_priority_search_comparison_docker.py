@@ -28,19 +28,25 @@ import paynt.quotient.mdp as modified_mdp_quotient
 import paynt.utils.timer
 
 # Store references to modified classes
+print(f"[DEBUG] ModifiedSynthesizerAR loaded from: {modified_synthesizer_ar.__file__}")
 ModifiedSynthesizerAR = modified_synthesizer_ar.SynthesizerAR
 modified_parse_sketch = modified_sketch.Sketch.load_sketch
 
-# Clear and re-import from original
+# Clear ALL paynt modules to force clean reimport
 sys.path.remove(str(project_root / "synthesis-modified"))
-sys.modules.pop('paynt.parser.sketch', None)
-sys.modules.pop('paynt.synthesizer.synthesizer_ar', None)
-sys.modules.pop('paynt.quotient.mdp', None)
+modules_to_remove = [key for key in sys.modules.keys() if key.startswith('paynt')]
+for module in modules_to_remove:
+    sys.modules.pop(module, None)
 
 # Re-insert original at the front
 sys.path.insert(0, str(project_root / "synthesis-original"))
+
+# Import original versions - these should now come from synthesis-original
 import paynt.parser.sketch as original_sketch
 import paynt.synthesizer.synthesizer_ar as original_synthesizer_ar
+
+# Verify we got the right version
+print(f"[DEBUG] OriginalSynthesizerAR loaded from: {original_synthesizer_ar.__file__}")
 
 OriginalSynthesizerAR = original_synthesizer_ar.SynthesizerAR
 original_parse_sketch = original_sketch.Sketch.load_sketch
@@ -154,11 +160,11 @@ def test_simple_mdp_comparison():
     
     # Run original synthesizer
     print("\nRunning ORIGINAL (Stack-Based) Synthesizer...")
-    original_result = run_synthesis(OriginalSynthesizerAR, sketch_path, props_path, max_timeout=300)
+    original_result = run_synthesis(OriginalSynthesizerAR, sketch_path, props_path, max_timeout=1000)
     
     # Run modified synthesizer
     print("\nRunning MODIFIED (Priority-Queue-Based) Synthesizer...")
-    modified_result = run_synthesis(ModifiedSynthesizerAR, sketch_path, props_path, max_timeout=300)
+    modified_result = run_synthesis(ModifiedSynthesizerAR, sketch_path, props_path, max_timeout=1000)
     
     # Print comparison
     print_comparison_table([original_result, modified_result], "Simple Sketch")
