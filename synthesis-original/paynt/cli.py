@@ -14,11 +14,13 @@ import paynt.synthesizer.synthesizer
 import paynt.synthesizer.synthesizer_cegis
 import paynt.synthesizer.policy_tree
 import paynt.synthesizer.decision_tree
+from paynt.utils.progress_logger import CsvProgressLogger
 
 import click
 import sys
 import os
 import cProfile, pstats
+from pathlib import Path
 
 import logging
 logger = logging.getLogger(__name__)
@@ -142,6 +144,12 @@ def setup_logger(log_path = None):
 )
 @click.option("--profiling", is_flag=True, default=False,
     help="run profiling")
+@click.option("--progress-log", type=click.Path(),
+    help="Path to a CSV file where progress updates will be appended.")
+@click.option("--progress-interval", type=float, default=5.0, show_default=True,
+    help="Seconds between periodic progress updates; set to 0 to disable.")
+@click.option("--progress-metadata", type=str,
+    help="Comma-separated key=value pairs to include with every progress row.")
 
 def paynt_run(
     project, sketch, props, relative_error, optimum_threshold, precision, exact, timeout,
@@ -158,7 +166,10 @@ def paynt_run(
     constraint_bound,
     dt_setting,
     ce_generator,
-    profiling
+    profiling,
+    progress_log,
+    progress_interval,
+    progress_metadata
 ):
 
     profiler = None
@@ -168,6 +179,25 @@ def paynt_run(
     paynt.utils.timer.GlobalTimer.start(timeout)
 
     logger.info("This is Paynt version {}.".format(version()))
+
+    def _parse_progress_metadata(raw: str):
+        metadata = {}
+        if not raw:
+            return metadata
+        entries = [entry.strip() for entry in raw.split(",") if entry.strip()]
+        for entry in entries:
+            if "=" in entry:
+                key, value = entry.split("=", 1)
+            else:
+                key, value = entry, ""
+            metadata[key.strip()] = value.strip()
+        return metadata
+
+    progress_metadata_dict = _parse_progress_metadata(progress_metadata)
+    default_version = "modified" if "synthesis-modified" in Path(__file__).resolve().parts else "original"
+    progress_metadata_dict.setdefault("algorithm_version", default_version)
+    project_path = Path(project).resolve()
+    progress_metadata_dict.setdefault("benchmark_name", project_path.name)
 
     # set CLI parameters
     paynt.quotient.quotient.Quotient.disable_expected_visits = disable_expected_visits
@@ -202,6 +232,34 @@ def paynt_run(
         tree_helper_path = None
     quotient = paynt.parser.sketch.Sketch.load_sketch(sketch_path, properties_path, export, relative_error, precision, constraint_bound, tree_helper_path, exact)
     synthesizer = paynt.synthesizer.synthesizer.Synthesizer.choose_synthesizer(quotient, method, fsc_synthesis, storm_control)
+    if progress_log:
+        interval = None if progress_interval is None or progress_interval <= 0 else float(progress_interval)
+        fieldnames = [
+            "timestamp",
+            "best_value",
+            "tree_size",
+            "tree_depth",
+            "frontier_size",
+            "families_evaluated",
+            "improvement_count",
+            "lower_bound",
+            "event",
+        ]
+        for key in progress_metadata_dict.keys():
+            if key not in fieldnames:
+                fieldnames.append(key)
+        progress_writer = CsvProgressLogger(progress_log, fieldnames)
+
+        def _progress_callback(row):
+            progress_writer.write_row(row)
+
+        synthesizer.set_progress_observer(
+            _progress_callback,
+            interval_seconds=interval,
+            metadata=progress_metadata_dict,
+        )
+    else:
+        synthesizer.set_progress_observer(None)
     synthesizer.run(optimum_threshold)
 
     if profiling:
