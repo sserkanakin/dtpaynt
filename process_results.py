@@ -17,6 +17,13 @@ try:
 except Exception:  # pragma: no cover - matplotlib is optional
     plt = None  # type: ignore
 
+try:
+    import pandas as pd
+except ImportError as exc:  # pragma: no cover
+    raise ImportError(
+        "pandas is required to process PAYNT results. Install it via 'pip install pandas'."
+    ) from exc
+
 
 @dataclass
 class ProgressEntry:
@@ -40,6 +47,7 @@ class RunSummary:
     timestamp_dt: Optional[datetime]
     timeout_seconds: Optional[float]
     progress: List[ProgressEntry]
+    progress_frame: pd.DataFrame
     final_best_value: Optional[float]
     time_to_best: Optional[float]
     finish_time: Optional[float]
@@ -78,25 +86,56 @@ def parse_int(value: str) -> Optional[int]:
         return None
 
 
-def read_progress_csv(csv_path: Path) -> List[ProgressEntry]:
+def read_progress_csv(csv_path: Path) -> Tuple[List[ProgressEntry], pd.DataFrame]:
+    if not csv_path.is_file():
+        return [], pd.DataFrame()
+
+    df = pd.read_csv(csv_path)
+    expected_columns = [
+        "timestamp",
+        "best_value",
+        "tree_size",
+        "tree_depth",
+        "frontier_size",
+        "families_evaluated",
+        "improvement_count",
+        "lower_bound",
+        "event",
+    ]
+    for column in expected_columns:
+        if column not in df.columns:
+            df[column] = pd.NA
+
+    numeric_columns = [
+        "timestamp",
+        "best_value",
+        "tree_size",
+        "tree_depth",
+        "frontier_size",
+        "families_evaluated",
+        "improvement_count",
+        "lower_bound",
+    ]
+    df[numeric_columns] = df[numeric_columns].apply(pd.to_numeric, errors="coerce")
+    df["event"] = df["event"].fillna("").astype(str).str.strip()
+
     entries: List[ProgressEntry] = []
-    with csv_path.open("r", newline="") as handle:
-        reader = csv.DictReader(handle)
-        for row in reader:
-            entries.append(
-                ProgressEntry(
-                    timestamp=parse_float(row.get("timestamp", "")),
-                    best_value=parse_float(row.get("best_value", "")),
-                    tree_size=parse_int(row.get("tree_size", "")),
-                    tree_depth=parse_int(row.get("tree_depth", "")),
-                    frontier_size=parse_int(row.get("frontier_size", "")),
-                    families_evaluated=parse_int(row.get("families_evaluated", "")),
-                    improvement_count=parse_int(row.get("improvement_count", "")),
-                    lower_bound=parse_float(row.get("lower_bound", "")),
-                    event=row.get("event", "").strip(),
-                )
+    for record in df.to_dict(orient="records"):
+        entries.append(
+            ProgressEntry(
+                timestamp=parse_float(record.get("timestamp")),
+                best_value=parse_float(record.get("best_value")),
+                tree_size=parse_int(record.get("tree_size")),
+                tree_depth=parse_int(record.get("tree_depth")),
+                frontier_size=parse_int(record.get("frontier_size")),
+                families_evaluated=parse_int(record.get("families_evaluated")),
+                improvement_count=parse_int(record.get("improvement_count")),
+                lower_bound=parse_float(record.get("lower_bound")),
+                event=record.get("event", ""),
             )
-    return entries
+        )
+
+    return entries, df
 
 
 def last_non_none(entries: Sequence[ProgressEntry], attr: str) -> Optional[float]:
@@ -105,6 +144,30 @@ def last_non_none(entries: Sequence[ProgressEntry], attr: str) -> Optional[float
         if value is not None:
             return value
     return None
+
+
+def _series_last_value(frame: pd.DataFrame, column: str) -> Optional[int]:
+    if column not in frame.columns:
+        return None
+    series = frame[column].dropna()
+    if series.empty:
+        return None
+    try:
+        return int(round(float(series.iloc[-1])))
+    except (TypeError, ValueError):
+        return None
+
+
+def _series_last_float(frame: pd.DataFrame, column: str) -> Optional[float]:
+    if column not in frame.columns:
+        return None
+    series = frame[column].dropna()
+    if series.empty:
+        return None
+    try:
+        return float(series.iloc[-1])
+    except (TypeError, ValueError):
+        return None
 
 
 def first_time_for_value(events: Sequence[Tuple[float, float]], target: float) -> Optional[float]:
@@ -119,8 +182,8 @@ def summarise_run(algorithm_version: str, benchmark: str, run_dir: Path) -> Opti
     info_path = run_dir / "run-info.json"
     if not progress_path.is_file():
         return None
-    progress = read_progress_csv(progress_path)
-    if not progress:
+    progress_entries, progress_df = read_progress_csv(progress_path)
+    if progress_df.empty:
         return None
 
     run_info: Dict[str, object] = {}
@@ -141,26 +204,20 @@ def summarise_run(algorithm_version: str, benchmark: str, run_dir: Path) -> Opti
         except ValueError:
             timestamp_dt = None
 
-    best_events: List[Tuple[float, float]] = []
-    for entry in progress:
-        if entry.best_value is None:
-            continue
-        timestamp = entry.timestamp if entry.timestamp is not None else 0.0
-        best_events.append((timestamp, entry.best_value))
-
-    final_best_value: Optional[float] = best_events[-1][1] if best_events else None
+    best_series = progress_df.dropna(subset=["best_value", "timestamp"])
+    final_best_value: Optional[float] = None
     time_to_best: Optional[float] = None
-    if final_best_value is not None:
-        time_to_best = first_time_for_value(best_events, final_best_value)
+    if not best_series.empty:
+        final_best_value = float(best_series["best_value"].iloc[-1])
+        matches = best_series[best_series["best_value"] == final_best_value]["timestamp"].dropna()
+        if not matches.empty:
+            time_to_best = float(matches.iloc[0])
 
-    finish_time: Optional[float] = None
-    for entry in progress:
-        if entry.event == "finished":
-            finish_time = entry.timestamp
-            break
+    finish_rows = progress_df[progress_df["event"] == "finished"]["timestamp"].dropna()
+    finish_time: Optional[float] = float(finish_rows.iloc[0]) if not finish_rows.empty else None
 
-    frontier_values = [value for value in (entry.frontier_size for entry in progress) if value is not None]
-    max_frontier_size = max(frontier_values) if frontier_values else None
+    frontier_series = progress_df["frontier_size"].dropna()
+    max_frontier_size = float(frontier_series.max()) if not frontier_series.empty else None
 
     summary = RunSummary(
         algorithm_version=algorithm_version,
@@ -169,20 +226,21 @@ def summarise_run(algorithm_version: str, benchmark: str, run_dir: Path) -> Opti
         timestamp_utc=timestamp_utc,
         timestamp_dt=timestamp_dt,
         timeout_seconds=timeout_seconds,
-        progress=progress,
+        progress=progress_entries,
+        progress_frame=progress_df,
         final_best_value=final_best_value,
         time_to_best=time_to_best,
         finish_time=finish_time,
-        final_tree_size=last_non_none(progress, "tree_size"),
-        final_tree_depth=last_non_none(progress, "tree_depth"),
-        final_frontier_size=last_non_none(progress, "frontier_size"),
+        final_tree_size=_series_last_value(progress_df, "tree_size"),
+        final_tree_depth=_series_last_value(progress_df, "tree_depth"),
+        final_frontier_size=_series_last_value(progress_df, "frontier_size"),
         max_frontier_size=max_frontier_size,
-        final_families_evaluated=last_non_none(progress, "families_evaluated"),
-        final_improvement_count=last_non_none(progress, "improvement_count"),
-        final_lower_bound=last_non_none(progress, "lower_bound"),
-        improvement_events=sum(1 for entry in progress if entry.event == "improvement"),
-        lower_bound_events=sum(1 for entry in progress if entry.event == "lower_bound"),
-        total_events=len(progress),
+        final_families_evaluated=_series_last_value(progress_df, "families_evaluated"),
+        final_improvement_count=_series_last_value(progress_df, "improvement_count"),
+        final_lower_bound=_series_last_float(progress_df, "lower_bound"),
+        improvement_events=int((progress_df["event"] == "improvement").sum()),
+        lower_bound_events=int((progress_df["event"] == "lower_bound").sum()),
+        total_events=len(progress_entries),
         run_dir=run_dir,
     )
     return summary
@@ -517,6 +575,78 @@ def generate_plots(
         )
 
 
+def build_latest_dataframe(latest_runs: Dict[Tuple[str, str], RunSummary]) -> pd.DataFrame:
+    records: List[Dict[str, Optional[float]]] = []
+    for (algorithm, benchmark), summary in latest_runs.items():
+        records.append(
+            {
+                "Benchmark": benchmark,
+                "algorithm": algorithm,
+                "Value": summary.final_best_value,
+                "TreeSize": summary.final_tree_size,
+                "TreeDepth": summary.final_tree_depth,
+                "FinishTime": summary.finish_time,
+            }
+        )
+    if not records:
+        return pd.DataFrame(columns=["Benchmark", "algorithm", "Value", "TreeSize", "TreeDepth", "FinishTime"])
+    df = pd.DataFrame.from_records(records)
+    return df
+
+
+def write_final_summary_table(df: pd.DataFrame, algorithms: Sequence[str], output_path: Path) -> None:
+    if df.empty:
+        return
+    metrics = [
+        ("Value", "Value"),
+        ("TreeSize", "TreeSize"),
+        ("TreeDepth", "TreeDepth"),
+        ("FinishTime", "FinishTime"),
+    ]
+    data: Dict[str, pd.Series] = {}
+    for algorithm in algorithms:
+        subset = df[df["algorithm"] == algorithm].set_index("Benchmark")
+        if subset.empty:
+            continue
+        for metric_key, suffix in metrics:
+            if metric_key in subset.columns:
+                column_name = f"{algorithm}_{suffix}"
+                data[column_name] = subset[metric_key]
+    if not data:
+        return
+    wide = pd.DataFrame(data)
+    if wide.empty:
+        return
+    wide.index.name = "Benchmark"
+    wide = wide.reset_index().sort_values("Benchmark")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    wide.to_csv(output_path, index=False)
+
+
+def generate_scatter_plots(df: pd.DataFrame, output_dir: Path) -> None:
+    if plt is None or df.empty:
+        return
+    output_dir.mkdir(parents=True, exist_ok=True)
+    scatter_specs = [
+        ("TreeSize", "Value", "Final_Value_vs_Size_Scatter.png", "Final tree size", "Final best value"),
+        ("TreeDepth", "Value", "Final_Value_vs_Depth_Scatter.png", "Final tree depth", "Final best value"),
+    ]
+    for x_key, y_key, filename, xlabel, ylabel in scatter_specs:
+        plot_df = df.dropna(subset=[x_key, y_key])
+        if plot_df.empty:
+            continue
+        fig, ax = plt.subplots()
+        for algorithm, group in plot_df.groupby("algorithm"):
+            ax.scatter(group[x_key].astype(float), group[y_key].astype(float), label=algorithm, alpha=0.8)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.legend()
+        ax.grid(True, linestyle="--", linewidth=0.4)
+        fig.tight_layout()
+        fig.savefig(output_dir / filename, dpi=150)
+        plt.close(fig)
+
+
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Process PAYNT experiment logs.")
     parser.add_argument(
@@ -597,6 +727,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("Skipping comparison table because fewer than two algorithms were detected.")
 
     generate_plots(latest_runs, output_dir / "figures", algorithm_labels)
+
+    latest_df = build_latest_dataframe(latest_runs)
+    final_summary_path = output_dir.parent / "final_results_summary.csv"
+    write_final_summary_table(latest_df, algorithm_labels, final_summary_path)
+    generate_scatter_plots(latest_df, output_dir.parent / "plots")
 
     print(f"Processed {len(summaries)} runs. Outputs written to {output_dir}.")
     if plt is None:

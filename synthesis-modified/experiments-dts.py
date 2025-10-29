@@ -44,6 +44,24 @@ DEFAULT_BENCHMARKS: Dict[str, Dict[str, str]] = {
         "props": "model.props",
         "extra_args": "--add-dont-care-action --tree-depth 3",
     },
+    "maze-concise": {
+        "path": "models/dtmc/maze/concise",
+        "sketch": "sketch.templ",
+        "props": "sketch.props",
+        "extra_args": "",
+    },
+    "grid-easy": {
+        "path": "models/dtmc/grid/grid",
+        "sketch": "sketch.templ",
+        "props": "easy.props",
+        "extra_args": "",
+    },
+    "grid-hard": {
+        "path": "models/dtmc/grid/grid",
+        "sketch": "sketch.templ",
+        "props": "hard.props",
+        "extra_args": "",
+    },
 }
 
 DEFAULT_PRESETS: List[str] = ["csma-3-4", "consensus-4-2", "obstacles"]
@@ -56,6 +74,17 @@ def detect_algorithm_version() -> str:
     if "synthesis-original" in parts:
         return "original"
     return "unknown"
+
+
+def format_algorithm_variant(base: str, heuristic: str, alpha: float) -> str:
+    if base != "modified":
+        return base
+    if heuristic in {"bounds_gap", "upper_bound"}:
+        return f"{base}_bounds_gap"
+    if heuristic == "value_size":
+        alpha_token = ("{:.3f}".format(alpha)).rstrip("0").rstrip(".")
+        return f"{base}_value_size_alpha{alpha_token}"
+    return f"{base}_value_only"
 
 
 def default_output_root() -> Path:
@@ -167,6 +196,21 @@ def build_metadata_string(metadata: Dict[str, str]) -> Optional[str]:
     default="",
     help="Additional arguments forwarded to paynt.py (quoted string).",
 )
+@click.option(
+    "--heuristic",
+    type=click.Choice(["value_only", "value_size", "bounds_gap", "upper_bound"]),
+    default="value_only",
+    show_default=True,
+    help="Priority heuristic for the modified synthesizer.",
+)
+@click.option(
+    "--heuristic-alpha",
+    "heuristic_alpha",
+    type=float,
+    default=0.1,
+    show_default=True,
+    help="Alpha used by the value_size heuristic.",
+)
 @click.option("--force", is_flag=True, help="Do not skip runs if a destination folder already exists.")
 @click.option("--list", "list_defaults", is_flag=True, help="List available default benchmarks and exit.")
 def main(
@@ -175,12 +219,15 @@ def main(
     output_root: Optional[str],
     progress_interval: float,
     extra_args: str,
+    heuristic: str,
+    heuristic_alpha: float,
     force: bool,
     list_defaults: bool,
 ):
     """Execute PAYNT experiments with structured progress logging."""
 
     algorithm_version = detect_algorithm_version()
+    algorithm_label = format_algorithm_variant(algorithm_version, heuristic, heuristic_alpha)
 
     if list_defaults:
         click.echo("Available benchmark presets:")
@@ -202,7 +249,7 @@ def main(
             benchmarks_to_run.append(resolve_benchmark(identifier))
 
     output_directory = Path(output_root) if output_root else default_output_root()
-    target_root = output_directory / algorithm_version
+    target_root = output_directory / algorithm_label
     target_root.mkdir(parents=True, exist_ok=True)
 
     extra_args_list = shlex.split(extra_args)
@@ -226,7 +273,7 @@ def main(
         stdout_log = run_dir / "stdout.txt"
 
         metadata = {
-            "algorithm_version": algorithm_version,
+            "algorithm_version": algorithm_label,
             "benchmark_name": benchmark.identifier,
             "run_id": run_id,
         }
@@ -245,7 +292,11 @@ def main(
             str(progress_log),
             "--progress-interval",
             str(progress_interval),
+            "--heuristic",
+            heuristic,
         ]
+        if heuristic == "value_size":
+            command.extend(["--heuristic-alpha", str(heuristic_alpha)])
         if metadata_string:
             command.extend(["--progress-metadata", metadata_string])
         combined_extra_args = benchmark.extra_args + extra_args_list
@@ -260,8 +311,10 @@ def main(
             "sketch": benchmark.sketch,
             "props": benchmark.props,
             "timeout": timeout,
+            "heuristic": heuristic,
+            "heuristic_alpha": heuristic_alpha,
+            "algorithm_version": algorithm_label,
             "progress_interval": progress_interval,
-            "algorithm_version": algorithm_version,
             "progress_log": str(progress_log),
             "stdout_log": str(stdout_log),
             "benchmark_extra_args": benchmark.extra_args,
@@ -288,6 +341,8 @@ def main(
                 "run_dir": str(run_dir),
                 "progress_log": str(progress_log),
                 "extra_args": " ".join(combined_extra_args),
+                "heuristic": heuristic,
+                "heuristic_alpha": heuristic_alpha,
             }
         )
 
@@ -296,6 +351,12 @@ def main(
         for record in summary:
             click.echo(
                 f"  - {record['benchmark']}: progress={record['progress_log']} (artefacts in {record['run_dir']})"
+                + (f" heuristic={record['heuristic']}" if record.get("heuristic") else "")
+                + (
+                    f" alpha={record['heuristic_alpha']}"
+                    if record.get("heuristic") == "value_size"
+                    else ""
+                )
                 + (f" extra_args={record['extra_args']}" if record.get("extra_args") else "")
             )
     else:

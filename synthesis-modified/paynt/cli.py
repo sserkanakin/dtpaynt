@@ -11,6 +11,7 @@ import paynt.quotient.storm_pomdp_control
 import paynt.quotient.mdp
 
 import paynt.synthesizer.synthesizer
+import paynt.synthesizer.synthesizer_ar
 import paynt.synthesizer.synthesizer_cegis
 import paynt.synthesizer.policy_tree
 import paynt.synthesizer.decision_tree
@@ -77,6 +78,21 @@ def setup_logger(log_path = None):
     default="ar", show_default=True,
     help="synthesis method"
     )
+@click.option(
+    "--heuristic",
+    type=click.Choice(["value_only", "value_size", "bounds_gap", "upper_bound"]),
+    default="value_only",
+    show_default=True,
+    help="Priority heuristic used by the AR synthesizer",
+)
+@click.option(
+    "--heuristic-alpha",
+    "heuristic_alpha",
+    type=click.FLOAT,
+    default=0.1,
+    show_default=True,
+    help="Alpha coefficient for value_size heuristic.",
+)
 
 @click.option("--disable-expected-visits", is_flag=True, default=False,
     help="do not compute expected visits for the splitting heuristic")
@@ -155,6 +171,8 @@ def paynt_run(
     project, sketch, props, relative_error, optimum_threshold, precision, exact, timeout,
     export,
     method,
+    heuristic,
+    heuristic_alpha,
     disable_expected_visits,
     fsc_synthesis, fsc_memory_size, posterior_aware,
     storm_pomdp, iterative_storm, get_storm_result, storm_options, prune_storm,
@@ -198,6 +216,9 @@ def paynt_run(
     progress_metadata_dict.setdefault("algorithm_version", default_version)
     project_path = Path(project).resolve()
     progress_metadata_dict.setdefault("benchmark_name", project_path.name)
+    progress_metadata_dict.setdefault("heuristic", heuristic)
+    if heuristic == "value_size":
+        progress_metadata_dict.setdefault("heuristic_alpha", str(heuristic_alpha))
 
     # set CLI parameters
     paynt.quotient.quotient.Quotient.disable_expected_visits = disable_expected_visits
@@ -214,6 +235,11 @@ def paynt_run(
     paynt.synthesizer.decision_tree.SynthesizerDecisionTree.tree_enumeration = tree_enumeration
     paynt.synthesizer.decision_tree.SynthesizerDecisionTree.scheduler_path = tree_map_scheduler
     paynt.quotient.mdp.MdpQuotient.add_dont_care_action = add_dont_care_action
+
+    paynt.synthesizer.synthesizer_ar.SynthesizerAR.configure_heuristic(
+        heuristic=heuristic,
+        alpha=heuristic_alpha,
+    )
 
     storm_control = None
     if storm_pomdp:

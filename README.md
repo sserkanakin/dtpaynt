@@ -1,277 +1,143 @@
-You are absolutely right. My apologies\! The previous `README.md` was incorrect because it didn't reflect the two-folder setup we decided on. It was still based on the old single-source structure.
+# DTPAYNT Heuristic Playground
 
-Let's create the correct and final `README.md` for your repository. This version explains the two-folder structure and how to use build arguments to create the separate Docker images for comparison.
+This repository keeps two PAYNT source trees side by side so that refined best-first heuristics can be compared against the original stack-based search.
 
------
+- `synthesis-original/` – upstream depth-first solver packaged with the CAV artefact.
+- `synthesis-modified/` – priority-queue synthesizer with pluggable heuristics and enhanced logging.
 
-# DTPAYNT Search Algorithm Extension
+Use the top-level `Dockerfile` and helper scripts to build images, execute benchmarks, and generate publication-ready tables and plots.
 
-This project contains a modified version of the DTPAYNT tool, originally provided as a supplement to the CAV'25 paper, "Small Decision Trees for MDPs with Deductive Synthesis".
-
-This repository is structured to manage two versions of the algorithm:
-
-1.  **The original Depth-First Search (DFS) algorithm.**
-2.  **Our modified Best-First Search (BFS) algorithm using a priority queue.**
-
-This README provides a complete guide to building the Docker environment for both versions, understanding our algorithmic improvements, and running experiments.
-
------
-
-## 1\. Setup and Build Instructions
-
-Follow these steps to build the Docker containers for both the original and modified algorithms.
-
-### Prerequisites
-
-  * **Docker**: Must be installed on your system.
-  * **This Git Repository**: You should have this repository cloned to your local machine.
-
-### Folder Structure
-
-This repository uses a two-folder approach to manage the different code versions. The `Dockerfile` is configured to build from either folder using a build argument. The structure is:
+## Repository Layout
 
 ```
 .
-├── Dockerfile
-├── synthesis-original/     <-- Contains the original DFS code
-└── synthesis-modified/     <-- Contains our new Best-First Search code
+├── Dockerfile                     # Multi-stage image that builds either source tree
+├── BENCHMARKS.md                  # Catalogue of preset models used in experiments
+├── process_results.py             # pandas/matplotlib aggregation pipeline
+├── results/                       # Host-side artefacts (logs, tables, plots)
+├── run_tests_docker.sh            # Convenience wrapper that executes pytest in Docker
+├── run_simple_test_docker.sh      # Single-benchmark smoke test in Docker
+├── run_comprehensive_tests.sh     # Launches the full regression suite on bare metal
+├── synthesis-original/            # Baseline PAYNT implementation (stack search)
+└── synthesis-modified/            # Heuristic-enabled PAYNT implementation (priority queue)
 ```
 
-### Build the Docker Images
+## Build Docker Images
 
-You will build two separate Docker images, one for each version of the algorithm.
+All commands below assume you are in the repository root.
 
-1.  Open a terminal or command prompt.
+1. Build the modified priority-queue solver (default `SRC_FOLDER`):
+   ```bash
+   docker build -t dtpaynt-modified .
+   ```
+2. Build the baseline stack solver by switching the build argument:
+   ```bash
+   docker build --build-arg SRC_FOLDER=synthesis-original -t dtpaynt-original .
+   ```
+3. (Optional) Rebuild after editing native dependencies in `payntbind/`:
+   ```bash
+   docker build --no-cache -t dtpaynt-modified-dev .
+   ```
 
-2.  Navigate to the root directory of this repository (the one containing the `Dockerfile`).
+Each image exposes `/opt/synthesis-{modified,original}` inside the container with Storm, pycarl, Boost, and matplotlib ready to use.
 
-3.  **Build the image for the original algorithm**:
+## Heuristic Options
 
-    ```bash
-    docker build --build-arg SRC_FOLDER=synthesis-original -t dtpaynt-original .
-    ```
+The modified synthesizer accepts a priority heuristic via `--heuristic` (wired through `experiments-dts.py` to `paynt.py`).
 
-4.  **Build the image for our modified algorithm**:
+| Flag | Description |
+|------|-------------|
+| `value_only` | Greedy best-first queue based solely on the latest improving value (matches the first prototype). |
+| `value_size` + `--heuristic-alpha <α>` | Penalises wide families: priority = value − α·size. Start with α = 0.1. |
+| `bounds_gap` | Uses the ratio lower_bound / (upper_bound − lower_bound + ε) to emphasise families that reduce the residual gap. |
+| `upper_bound` | Alias for `bounds_gap`; maintained for backwards compatibility. |
 
-    ```bash
-    docker build --build-arg SRC_FOLDER=synthesis-modified -t dtpaynt-dev .
-    ```
+Heuristic selections and α-coefficients are recorded in the progress metadata so that downstream analysis can group runs automatically.
 
-After these commands complete, you will have two Docker images ready for comparison: `dtpaynt-original` and `dtpaynt-dev`.
+## Run Experiments in Docker
 
------
-
-## 2\. Our Modifications: A Smarter Search Strategy
-
-We have modified the core search strategy of the DTPAYNT algorithm to improve how it explores potential solutions.
-
-  * **Original Algorithm (`dtpaynt-original`)**: The original implementation uses a **stack** to process families of solutions. This results in a **Depth-First Search (DFS)**, where the algorithm explores one branch of the search space as deeply as possible before backtracking.
-
-  * **Our Improvement (`dtpaynt-dev`)**: We replaced the stack with a **priority queue**. This changes the strategy to a **Best-First Search**. The algorithm now uses its internal scoring heuristic (related to the "harmonizing value") to decide which family of solutions is the most promising to explore next. This has the potential to find optimal solutions more quickly.
-
------
-
-## 3\. Results Layout at a Glance
-
-All experiment artefacts now live under a single `results/` directory so you can compare runs without hunting across multiple folders:
-
-```
-results/
-  logs/
-    original/   # PAYNT logs produced by the original stack-based solver
-    modified/   # PAYNT logs produced by the priority-queue solver
-  analysis/     # Tables and plots generated by process_results.py
-  subsets/      # Raw outputs from experiments.sh (smoke tests, model subsets)
-  archive/      # Legacy runs you want to keep but ignore for comparisons
-```
-
-`process_results.py` reads from `results/logs` by default and writes the aggregated CSVs/plots to `results/analysis`.
-
-## 4\. How to Run Experiments for Comparison
-
-Once both images are built, you can run experiments and bind-mount the correct subfolder from `results/`.
-
-### Quick Smoke Test (sanity check)
+Mount a persistent results directory from the host and call the Click runner inside the desired image.
 
 ```bash
-# Original DFS solver
-docker run -v="$(pwd)/results/subsets/original":/opt/cav25-experiments/results -it dtpaynt-original \
-  ./experiments.sh --smoke-test --skip-omdt
+HOST_RESULTS="$(pwd)/results"
+mkdir -p "$HOST_RESULTS/logs"
 
-# Modified priority-queue solver
-docker run -v="$(pwd)/results/subsets/modified":/opt/cav25-experiments/results -it dtpaynt-dev \
-  ./experiments.sh --smoke-test --skip-omdt
-```
-
-Both commands should finish with `Smoke test passed!`.
-
-### Model Subset (13 benchmarks)
-
-```bash
-docker run -v="$(pwd)/results/subsets/original":/opt/cav25-experiments/results -it dtpaynt-original \
-  ./experiments.sh --skip-omdt --model-subset
-
-docker run -v="$(pwd)/results/subsets/modified":/opt/cav25-experiments/results -it dtpaynt-dev \
-  ./experiments.sh --skip-omdt --model-subset
-```
-
-### Optional: with Gurobi (OMDT comparison)
-
-```bash
-docker run \
-  -v=/absolute/path/to/your/gurobi.lic:/opt/gurobi/gurobi.lic:ro \
-  -v="$(pwd)/results/subsets/modified":/opt/cav25-experiments/results \
-  -it dtpaynt-dev ./experiments.sh --smoke-test
-```
-
-Swap `dtpaynt-dev` for `dtpaynt-original` if you need the stack-based solver instead.
-
-## 5\. Structured Logging Runs (One-Liners)
-
-The Click-based runner writes a `progress.csv`, `stdout.txt`, and `run-info.json` per benchmark. Mount `results/logs/<algorithm>` into the container to collect them:
-
-```bash
-# Original solver, default presets (csma-3-4, consensus-4-2, obstacles)
+# Modified solver – value-only heuristic (default presets)
 docker run --rm \
-  -v "$(pwd)/results/logs/original":/results \
+  -v "$HOST_RESULTS/logs":/results \
+  dtpaynt-modified \
+  bash -lc "cd /opt/synthesis-modified && python3 experiments-dts.py \\
+    --timeout 1800 \\
+    --output-root /results/logs \\
+    --benchmark csma-3-4 --benchmark consensus-4-2 --benchmark obstacles \\
+    --heuristic value_only"
+
+# Modified solver – value_size heuristic with α = 0.1
+docker run --rm \
+  -v "$HOST_RESULTS/logs":/results \
+  dtpaynt-modified \
+  bash -lc "cd /opt/synthesis-modified && python3 experiments-dts.py \\
+    --timeout 1800 \\
+    --output-root /results/logs \\
+    --benchmark csma-3-4 --benchmark consensus-4-2 --benchmark obstacles \\
+    --benchmark models/dtmc/maze/concise \\
+    --heuristic value_size --heuristic-alpha 0.1"
+
+# Baseline solver for comparison
+docker run --rm \
+  -v "$HOST_RESULTS/logs":/results \
   dtpaynt-original \
-  bash -lc "cd /opt/synthesis-original && python3 experiments-dts.py \
-    --benchmark csma-3-4 --benchmark consensus-4-2 --benchmark obstacles \
-    --timeout 600 --output-root /results"
-
-# Modified solver, same presets
-docker run --rm \
-  -v "$(pwd)/results/logs/modified":/results \
-  dtpaynt-dev \
-  bash -lc "cd /opt/synthesis-modified && python3 experiments-dts.py \
-    --benchmark csma-3-4 --benchmark consensus-4-2 --benchmark obstacles \
-    --timeout 600 --output-root /results"
+  bash -lc "cd /opt/synthesis-original && python3 experiments-dts.py \\
+    --timeout 1800 \\
+    --output-root /results/logs \\
+    --benchmark csma-3-4 --benchmark consensus-4-2 --benchmark obstacles"
 ```
 
-Each run folder looks like `results/logs/original/csma-3-4/<timestamp>/`.
+Use `python experiments-dts.py --list` inside either tree to see all predefined presets. Pass a path (relative to the tree) via `--benchmark` to run custom models; the script infers sketch/props filenames when possible.
 
-### Optional: Force Larger Trees
+## Results and Post-Processing
 
-Use the built-in preset `csma-3-4-depth3` to exercise deeper trees:
+Every run produces a timestamped folder under `results/logs/<algorithm_variant>/<benchmark>/` containing:
+- `progress.csv` – structured progress log with timestamped metrics.
+- `stdout.txt` – full console output from PAYNT.
+- `run-info.json` – command-line parameters and metadata used for that run.
+
+Aggregate the latest runs across algorithms with the pandas-based helper:
 
 ```bash
-docker run --rm \
-  -v "$(pwd)/results/logs/original":/results \
-  dtpaynt-original \
-  bash -lc "cd /opt/synthesis-original && python3 experiments-dts.py \
-    --benchmark csma-3-4-depth3 --timeout 600 --output-root /results"
-
-docker run --rm \
-  -v "$(pwd)/results/logs/modified":/results \
-  dtpaynt-dev \
-  bash -lc "cd /opt/synthesis-modified && python3 experiments-dts.py \
-    --benchmark csma-3-4-depth3 --timeout 600 --output-root /results"
+python -m pip install --upgrade pandas matplotlib  # once on the host
+python process_results.py \
+  --algo-root original=results/logs/original \
+  --algo-root modified_value_only=results/logs/modified_value_only \
+  --algo-root modified_value_size_alpha0.1=results/logs/modified_value_size_alpha0.1 \
+  --algo-root modified_bounds_gap=results/logs/modified_bounds_gap \
+  --output-dir results/analysis
 ```
 
-## 6\. Benchmarks to Showcase Strengths, Weaknesses, and Parity
+Key artefacts:
+- `results/analysis/run_summary.csv` – per-run statistics (finish time, tree metrics, bounds events).
+- `results/final_results_summary.csv` – wide table suitable for publication.
+- `results/analysis/figures/*.png` – time-series plots (value, frontier size, lower bounds, families evaluated).
+- `results/plots/Final_Value_vs_Size_Scatter.png` and `Final_Value_vs_Depth_Scatter.png` – cross-algorithm scatter plots.
 
-Run the following docker one-liners to capture representative scenarios for the report. All artefacts land in `results/logs/<algorithm>` and can be compared with `process_results.py`.
+Update `results/analysis/priority_queue_benchmark.md` with highlights drawn from these outputs before sharing results.
 
-**Strength (modified clearly faster)** — `maze` MDP with many shallow improvements:
+## Automated Campaigns
 
-```bash
-docker run --rm \
-  -v "$(pwd)/results/logs/original":/results \
-  dtpaynt-original \
-  bash -lc "cd /opt/synthesis-original && python3 experiments-dts.py \
-    --benchmark models/mdp/maze --timeout 600 --output-root /results"
+- `./scripts/run_all_experiments.sh` builds images on demand, launches all solver variants in parallel, migrates any legacy `logs/logs` layout, and regenerates the analysis artefacts.
+- `./scripts/run_all_large_benchmarks.sh` targets deeper search trees by default (`csma-3-4-depth3`, `models/dtmc/maze/concise`, and `models/dtmc/grid/grid`) while delegating to the same orchestrator. Override `BENCHMARK_ARGS`, `TIMEOUT`, or `HEURISTIC_ALPHA` in the environment to tune the workload.
+- Set `PROGRESS_INTERVAL` (seconds) if you want coarser progress logging from the runners.
 
-docker run --rm \
-  -v "$(pwd)/results/logs/modified":/results \
-  dtpaynt-dev \
-  bash -lc "cd /opt/synthesis-modified && python3 experiments-dts.py \
-    --benchmark models/mdp/maze --timeout 600 --output-root /results"
-```
+## Tests
 
-**Weakness (stack search still wins)** — preset `csma-3-4-depth3` often favours the original heuristic due to the fixed depth target. Use the commands in Section 5 to gather both runs.
+- `./run_tests_docker.sh` runs the priority-search comparison tests inside Docker.
+- `./run_simple_test_docker.sh` executes a single benchmark smoke test.
+- `cd synthesis-modified && pytest tests/test_priority_search_comparison.py -v -s` verifies the heuristics locally once dependencies are installed.
 
-**Parity (nearly identical)** — `consensus-4-2` converges to the same policy and value with very minor timing differences. It is already part of the default preset in Section 5.
+## Workflow Checklist
 
-After collecting the runs, generate the comparison table and plots:
-
-```bash
-python process_results.py --logs-root results/logs --output-dir results/analysis
-```
-
-The script automatically picks up the latest run per benchmark for each algorithm.
-It also writes richer plots under `results/analysis/figures/`, including `frontier_size_vs_time.png`
-and `families_evaluated_vs_time.png`, so the queue dynamics are visible instead of flat tree lines.
-
-## 7\. Running Priority Search Comparison Tests
-
-To verify and compare the performance of the original stack-based search against the new priority-queue-based search, we provide automated tests.
-
-### Quick Test (Recommended)
-
-Simply run the provided test script:
-
-```bash
-./run_tests_docker.sh
-```
-
-This script will:
-1. Build a Docker image with both synthesis versions
-2. Run comprehensive comparison tests
-3. Display side-by-side performance metrics
-
-### Manual Docker Test
-
-If you prefer to run tests manually:
-
-```bash
-# Build the test image
-docker build -t dtpaynt-better-value --build-arg SRC_FOLDER=synthesis-modified .
-
-# Run the comparison tests
-docker run --rm dtpaynt-better-value \
-    bash -c "cd /opt/synthesis-modified && python tests/test_priority_search_comparison_docker.py"
-```
-
-### Local Test (Without Docker)
-
-If you have PAYNT installed locally:
-
-```bash
-cd synthesis-modified
-pytest tests/test_priority_search_comparison.py -v -s
-```
-
-### Test Output
-
-The tests will show:
-- Iteration-by-iteration priority queue processing logs
-- Performance comparison tables (Time, Value, Tree Size, Iterations)
-- Verification that modified algorithm ≥ original algorithm in solution quality
-
-Example output:
-```
-================================================================================
-COMPARISON RESULTS: Simple MDP
-================================================================================
-Algorithm                      Time (s)        Value           Tree Size       Iterations     
---------------------------------------------------------------------------------
-Original (Stack)               0.1234          9.8765          12              45             
-Modified (Priority-Q)          0.0987          9.8765          12              38             
-
-Time improvement: +20.00%
-Value improvement: +0.00%
-```
-
-## 8\. Accessing Results and Debugging
-
-- **Results**: Consolidated under `results/` as described in Section 3. Aggregated CSVs (`run_summary.csv`, `comparison_latest.csv`) and plots live in `results/analysis`.
-
-- **Interactive Shell**: If you need to debug or explore a container's file system, use the appropriate image name:
-
-Bash
-
-### To explore the modified version's container
-```bash
-docker run -it dtpaynt-dev bash
-```
-Once inside, you can navigate the file system using standard Linux commands. Type `exit` to leave the container.
+- Build both Docker images and ensure the host `results/` directory is writable.
+- Execute benchmarks for the original solver and each heuristic variant (value_only, value_size, bounds_gap).
+- Run `process_results.py` to regenerate CSVs and plots after each campaign.
+- Populate the summary tables in `results/analysis/priority_queue_benchmark.md` with fresh numbers.
+- Amend `BENCHMARKS.md` and the README if new presets or workflows are introduced.
