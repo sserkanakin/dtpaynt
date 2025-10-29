@@ -44,6 +44,24 @@ DEFAULT_BENCHMARKS: Dict[str, Dict[str, str]] = {
         "props": "model.props",
         "extra_args": "--add-dont-care-action --tree-depth 3",
     },
+    "maze-concise": {
+        "path": "models/dtmc/maze/concise",
+        "sketch": "sketch.templ",
+        "props": "sketch.props",
+        "extra_args": "",
+    },
+    "grid-easy": {
+        "path": "models/dtmc/grid/grid",
+        "sketch": "sketch.templ",
+        "props": "easy.props",
+        "extra_args": "",
+    },
+    "grid-hard": {
+        "path": "models/dtmc/grid/grid",
+        "sketch": "sketch.templ",
+        "props": "hard.props",
+        "extra_args": "",
+    },
 }
 
 DEFAULT_PRESETS: List[str] = ["csma-3-4", "consensus-4-2", "obstacles"]

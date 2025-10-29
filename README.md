@@ -125,7 +125,7 @@ Update `results/analysis/priority_queue_benchmark.md` with highlights drawn from
 ## Automated Campaigns
 
 - `./scripts/run_all_experiments.sh` builds images on demand, launches all solver variants in parallel, migrates any legacy `logs/logs` layout, and regenerates the analysis artefacts.
-- `./scripts/run_all_large_benchmarks.sh` targets deeper search trees by default (`csma-3-4-depth3`, `models/dtmc/maze/concise`, and `models/dtmc/grid/grid`) while delegating to the same orchestrator. Override `BENCHMARK_ARGS`, `TIMEOUT`, or `HEURISTIC_ALPHA` in the environment to tune the workload.
+- `./scripts/run_all_large_benchmarks.sh` targets deeper search trees by default (`csma-3-4-depth3`, `maze-concise`, and `grid-hard`) while delegating to the same orchestrator. Override `BENCHMARK_ARGS`, `TIMEOUT`, or `HEURISTIC_ALPHA` in the environment to tune the workload.
 - Set `PROGRESS_INTERVAL` (seconds) if you want coarser progress logging from the runners.
 
 ## Tests
