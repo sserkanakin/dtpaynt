@@ -12,11 +12,10 @@ logger = logging.getLogger(__name__)
 
 class FamilyEncoding():
 
-    def __init__(self, smt_solver, family, path_condition=None):
+    def __init__(self, smt_solver, family):
 
         self.smt_solver = smt_solver
         self.family = family
-        self.path_condition = path_condition or []
 
         # for each hole, a formula encoding its possible options
         self.hole_clauses = None
@@ -149,26 +148,26 @@ class SmtSolver():
             return None
 
 
-    def pick_assignment(self, family, path_condition=None):
+    def pick_assignment(self, family):
         '''
         :return unexplored hole assignment from the family
             (or None if no instance remains)
         '''
-        family.encode(self, path_condition=path_condition)
+        family.encode(self)
         return family.encoding.pick_assignment()
 
-    def pick_assignment_priority(self, family, priority_subfamily, path_condition=None):
+    def pick_assignment_priority(self, family, priority_subfamily):
 
         if priority_subfamily is None:
-            return self.pick_assignment(family, path_condition=path_condition)
+            return self.pick_assignment(family)
 
         # explore priority subfamily first
-        assignment = self.pick_assignment(priority_subfamily, path_condition=path_condition)
+        assignment = self.pick_assignment(priority_subfamily)
         if assignment is not None:
             return assignment
 
         # explore remaining members
-        return self.pick_assignment(family, path_condition=path_condition)
+        return self.pick_assignment(family)
     
     
     def exclude_conflicts(self, family, assignment, conflicts):
@@ -241,3 +240,4 @@ class SmtSolver():
         # create new scope
         self.solver.push()
         self.solver_depth += 1
+

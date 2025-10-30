@@ -32,6 +32,7 @@ class SynthesizerDecisionTree(paynt.synthesizer.synthesizer_ar.SynthesizerAR):
         super().__init__(*args)
         self.best_tree = None
         self.best_tree_value = None
+        self.target_value = None
 
     @property
     def method_name(self):
@@ -581,7 +582,7 @@ class SynthesizerDecisionTree(paynt.synthesizer.synthesizer_ar.SynthesizerAR):
             if self.resource_limit_reached():
                 break
 
-    def run(self, optimum_threshold=None):
+    def run(self, optimum_threshold=None, epsilon_optimal_stop=None):
         # self.quotient.reset_tree(SynthesizerDecisionTree.tree_depth,enable_harmonization=True)
         scheduler_choices = None
         if SynthesizerDecisionTree.scheduler_path is None:
@@ -607,6 +608,13 @@ class SynthesizerDecisionTree(paynt.synthesizer.synthesizer_ar.SynthesizerAR):
             mc_result = submdp.model_check_property(self.quotient.get_property())
         opt_result_value = mc_result.value
         logger.info(f"the optimal scheduler has value: {opt_result_value}")
+
+        if epsilon_optimal_stop is not None and self.quotient.specification.has_optimality:
+            if self.quotient.specification.optimality.minimizing:
+                self.target_value = opt_result_value + epsilon_optimal_stop # Target is V_opt + eps
+            else: # Maximizing
+                self.target_value = opt_result_value - epsilon_optimal_stop # Target is V_opt - eps
+            logger.info(f"Epsilon-optimal stop enabled. Target value: {self.target_value}")
 
         if self.quotient.DONT_CARE_ACTION_LABEL in self.quotient.action_labels:
             random_choices = self.quotient.get_random_choices()

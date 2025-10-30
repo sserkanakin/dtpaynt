@@ -30,4 +30,10 @@ RUN apt-get update && apt-get install -y vim
 RUN git clone https://github.com/randriu/dt-synthesis-cav-25.git cav25-experiments
 WORKDIR /opt/cav25-experiments
 
+# Copy the extended experiments script with epsilon-optimal-stop support
+COPY ./${SRC_FOLDER}/experiments-dts-cav-extended.py ./experiments-dts-cav.py
+# Copy the wrapper script with epsilon-optimal-stop support
+COPY ./${SRC_FOLDER}/experiments-wrapper.sh ./experiments.sh
+RUN chmod +x ./experiments.sh
+
 RUN export GRB_LICENSE_FILE=/opt/gurobi/gurobi.lic

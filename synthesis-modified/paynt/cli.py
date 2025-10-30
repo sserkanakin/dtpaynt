@@ -59,6 +59,8 @@ def setup_logger(log_path = None):
     help="relative error for optimal synthesis")
 @click.option("--optimum-threshold", type=click.FLOAT,
     help="known optimum bound")
+@click.option("--epsilon-optimal-stop", type=click.FLOAT, default=None,
+    help="Stop synthesis early if a solution within this absolute epsilon of the optimum is found.")
 @click.option("--precision", type=click.FLOAT, default=1e-4,
     help="model checking precision")
 @click.option("--exact", is_flag=True, default=False,
@@ -144,7 +146,7 @@ def setup_logger(log_path = None):
     help="run profiling")
 
 def paynt_run(
-    project, sketch, props, relative_error, optimum_threshold, precision, exact, timeout,
+    project, sketch, props, relative_error, optimum_threshold, epsilon_optimal_stop, precision, exact, timeout,
     export,
     method,
     disable_expected_visits,
@@ -202,7 +204,7 @@ def paynt_run(
         tree_helper_path = None
     quotient = paynt.parser.sketch.Sketch.load_sketch(sketch_path, properties_path, export, relative_error, precision, constraint_bound, tree_helper_path, exact)
     synthesizer = paynt.synthesizer.synthesizer.Synthesizer.choose_synthesizer(quotient, method, fsc_synthesis, storm_control)
-    synthesizer.run(optimum_threshold)
+    synthesizer.run(optimum_threshold, epsilon_optimal_stop=epsilon_optimal_stop)
 
     if profiling:
         profiler.disable()

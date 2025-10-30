@@ -1,5 +1,3 @@
-from typing import List
-
 import paynt.quotient.posmg
 import paynt.synthesizer.synthesizer
 import paynt.quotient.pomdp
@@ -10,30 +8,9 @@ logger = logging.getLogger(__name__)
 
 class SynthesizerAR(paynt.synthesizer.synthesizer.Synthesizer):
 
-    def __init__(self, quotient, path_condition: List = None):
-        super().__init__(quotient)
-        self.path_condition = path_condition or []
-
     @property
     def method_name(self):
         return "AR"
-
-    def set_path_condition(self, path_condition: List):
-        self.path_condition = path_condition or []
-
-    def optimize_subtree(self, subproblem, template, max_loss: float):
-        """
-        Optimize a sub-tree using heuristic pruning respecting the supplied template.
-        Returns a tuple (optimized_tree, loss, improved).
-        """
-        from paynt.utils import tree_slicer
-
-        candidate = tree_slicer.optimise_subproblem_structure(subproblem, template)
-        loss = tree_slicer.estimate_policy_loss(subproblem.subtree, candidate)
-        improved = len(candidate.collect_nonterminals()) < subproblem.original_nonterminal_count
-        if loss > max_loss or not improved:
-            return subproblem.subtree, loss, False
-        return candidate, loss, True
 
     def check_specification(self, family):
         ''' Check specification for mdp or smg based on self.quotient '''
@@ -143,6 +120,8 @@ class SynthesizerAR(paynt.synthesizer.synthesizer.Synthesizer):
 
         iteration_count = 0
 
+        target_val = getattr(self, 'target_value', None)
+
         while families:
             if self.resource_limit_reached():
                 break
@@ -153,6 +132,17 @@ class SynthesizerAR(paynt.synthesizer.synthesizer.Synthesizer):
             
             self.verify_family(family)
             self.update_optimum(family)
+            # --- EPSILON-OPTIMAL CHECK ---
+            if target_val is not None and self.best_assignment_value is not None and self.quotient.specification.has_optimality:
+                if self.quotient.specification.optimality.minimizing:
+                    if self.best_assignment_value <= target_val:
+                        logger.info(f"Found epsilon-optimal solution with value {self.best_assignment_value} (target: {target_val}). Stopping search.")
+                        break # Stop the while loop
+                else: # Maximizing
+                    if self.best_assignment_value >= target_val:
+                        logger.info(f"Found epsilon-optimal solution with value {self.best_assignment_value} (target: {target_val}). Stopping search.")
+                        break # Stop the while loop
+            # --- END CHECK ---
             if not self.quotient.specification.has_optimality and self.best_assignment is not None:
                 break
             # break

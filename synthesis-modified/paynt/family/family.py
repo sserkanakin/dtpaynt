@@ -161,9 +161,6 @@ class Family:
         pi.constraint_indices = cr.undecided_constraints if cr is not None else []
         return pi
 
-    def encode(self, smt_solver, path_condition=None):
-        rebuild_encoding = self.encoding is None or path_condition is not None
-        if rebuild_encoding:
-            self.encoding = paynt.family.smt.FamilyEncoding(
-                smt_solver, self, path_condition=path_condition
-            )
+    def encode(self, smt_solver):
+        if self.encoding is None:
+            self.encoding = paynt.family.smt.FamilyEncoding(smt_solver, self)

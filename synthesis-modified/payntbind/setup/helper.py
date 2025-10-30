@@ -41,7 +41,7 @@ def obtain_version():
 
     :return: Version
     """
-    verstr = "0.0.0"
+    verstr = "unknown"
     try:
         verstrline = open('lib/payntbind/_version.py', "rt").read()
     except EnvironmentError:
