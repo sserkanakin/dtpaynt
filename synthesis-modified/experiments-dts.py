@@ -7,9 +7,9 @@ import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 
 import click
 
@@ -37,6 +37,12 @@ DEFAULT_BENCHMARKS: Dict[str, Dict[str, str]] = {
         "sketch": "sketch.templ",
         "props": "sketch.props",
         "extra_args": "--add-dont-care-action",
+    },
+    "obstacles-depth2": {
+        "path": "models/mdp/obstacles",
+        "sketch": "sketch.templ",
+        "props": "sketch.props",
+        "extra_args": "--add-dont-care-action --tree-depth 2",
     },
     "csma-3-4-depth3": {
         "path": "models/dts-q4/csma-3-4",
@@ -145,7 +151,7 @@ def resolve_benchmark(identifier: str) -> Benchmark:
     return Benchmark(bench_path.name, bench_path, inferred["sketch"], inferred["props"], [])
 
 
-def stream_subprocess(command: List[str], cwd: Path, logfile: Path) -> int:
+def stream_subprocess(command: List[str], cwd: Path, logfile: Path, quiet: bool = True) -> int:
     logfile.parent.mkdir(parents=True, exist_ok=True)
     with logfile.open("w", encoding="utf-8") as stream:
         process = subprocess.Popen(
@@ -157,9 +163,47 @@ def stream_subprocess(command: List[str], cwd: Path, logfile: Path) -> int:
         )
         assert process.stdout is not None
         for line in process.stdout:
-            print(line, end="")
+            if not quiet:
+                print(line, end="")
             stream.write(line)
         return process.wait()
+
+
+def _read_progress_tail(progress_csv: Path) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+    """Returns (finish_time, best_value, time_to_best) from a progress CSV, if available.
+    - finish_time: timestamp of the final row
+    - best_value: last non-empty best_value seen
+    - time_to_best: timestamp of the latest 'improvement' event
+    """
+    try:
+        import csv
+        finish_time: Optional[float] = None
+        last_best: Optional[float] = None
+        time_to_best: Optional[float] = None
+        with progress_csv.open("r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                # timestamp is a float seconds; best_value may be empty
+                try:
+                    finish_time = float(row.get("timestamp") or "")
+                except Exception:
+                    pass
+                try:
+                    v = row.get("best_value")
+                    if v not in (None, ""):
+                        last_best = float(v)
+                except Exception:
+                    pass
+                # track last improvement time
+                try:
+                    if row.get("event") == "improvement":
+                        ts = float(row.get("timestamp") or "")
+                        time_to_best = ts if time_to_best is None or ts >= time_to_best else time_to_best
+                except Exception:
+                    pass
+        return finish_time, last_best, time_to_best
+    except Exception:
+        return None, None, None
 
 
 def build_metadata_string(metadata: Dict[str, str]) -> Optional[str]:
@@ -197,6 +241,11 @@ def build_metadata_string(metadata: Dict[str, str]) -> Optional[str]:
     help="Additional arguments forwarded to paynt.py (quoted string).",
 )
 @click.option(
+    "--quiet/--verbose",
+    default=True,
+    help="Suppress PAYNT stdout; only print run starts and a structured summary.",
+)
+@click.option(
     "--heuristic",
     type=click.Choice(["value_only", "value_size", "bounds_gap", "upper_bound"]),
     default="value_only",
@@ -223,6 +272,7 @@ def main(
     heuristic_alpha: float,
     force: bool,
     list_defaults: bool,
+    quiet: bool,
 ):
     """Execute PAYNT experiments with structured progress logging."""
 
@@ -257,7 +307,8 @@ def main(
     summary: List[Dict[str, str]] = []
 
     for benchmark in benchmarks_to_run:
-        timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+        # Use timezone-aware UTC timestamps (avoid deprecated utcnow)
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         run_id = f"{benchmark.identifier}-{timestamp}"
         run_dir = target_root / benchmark.identifier / run_id
 
@@ -271,6 +322,7 @@ def main(
 
         progress_log = run_dir / "progress.csv"
         stdout_log = run_dir / "stdout.txt"
+        export_base = run_dir / "tree"
 
         metadata = {
             "algorithm_version": algorithm_label,
@@ -292,6 +344,8 @@ def main(
             str(progress_log),
             "--progress-interval",
             str(progress_interval),
+            "--export-synthesis",
+            str(export_base),
             "--heuristic",
             heuristic,
         ]
@@ -329,36 +383,63 @@ def main(
 
         click.echo("")
         click.echo(f"Running {benchmark.identifier} (timeout={timeout}s)...")
-        exit_code = stream_subprocess(["python3"] + command, BASE_DIR, stdout_log)
+        exit_code = stream_subprocess(["python3"] + command, BASE_DIR, stdout_log, quiet=quiet)
         if exit_code != 0:
             raise click.ClickException(
                 f"PAYNT execution failed for {benchmark.identifier} with exit code {exit_code}."
             )
 
+        finish_time, best_value, time_to_best = _read_progress_tail(progress_log)
         summary.append(
             {
                 "benchmark": benchmark.identifier,
                 "run_dir": str(run_dir),
                 "progress_log": str(progress_log),
-                "extra_args": " ".join(combined_extra_args),
                 "heuristic": heuristic,
                 "heuristic_alpha": heuristic_alpha,
+                "timeout": timeout,
+                "finish_time": finish_time,
+                "best_value": best_value,
+                "time_to_best": time_to_best,
+                "extra_args": " ".join(combined_extra_args),
             }
         )
 
     if summary:
-        click.echo("\nCompleted runs:")
-        for record in summary:
-            click.echo(
-                f"  - {record['benchmark']}: progress={record['progress_log']} (artefacts in {record['run_dir']})"
-                + (f" heuristic={record['heuristic']}" if record.get("heuristic") else "")
-                + (
-                    f" alpha={record['heuristic_alpha']}"
-                    if record.get("heuristic") == "value_size"
-                    else ""
-                )
-                + (f" extra_args={record['extra_args']}" if record.get("extra_args") else "")
-            )
+        # Print a compact, structured summary table
+        headers = [
+            "benchmark",
+            "algorithm",
+            "heuristic",
+            "alpha",
+            "finish_time(s)",
+            "time_to_best(s)",
+            "best_value",
+            "timeout(s)",
+            "run_dir",
+        ]
+        rows: List[List[str]] = []
+        for r in summary:
+            rows.append([
+                r.get("benchmark", ""),
+                algorithm_label,
+                r.get("heuristic", ""),
+                ("{:.3f}".format(r["heuristic_alpha"]).rstrip("0").rstrip(".")) if r.get("heuristic") == "value_size" else "-",
+                "{:.3f}".format(r["finish_time"]) if isinstance(r.get("finish_time"), float) else "",
+                "{:.3f}".format(r["time_to_best"]) if isinstance(r.get("time_to_best"), float) else "",
+                "{:.6f}".format(r["best_value"]) if isinstance(r.get("best_value"), float) else "",
+                str(r.get("timeout", "")),
+                r.get("run_dir", ""),
+            ])
+        # Simple fixed-width table
+        colw = [max(len(h), *(len(row[i]) for row in rows)) for i, h in enumerate(headers)]
+        def fmt(row: List[str]) -> str:
+            return "| " + " | ".join(val.ljust(colw[i]) for i, val in enumerate(row)) + " |"
+        click.echo("")
+        click.echo(fmt(headers))
+        click.echo("|-" + "-|-".join("-" * w for w in colw) + "-|")
+        for row in rows:
+            click.echo(fmt(row))
     else:
         click.echo("No experiments were executed.")
 

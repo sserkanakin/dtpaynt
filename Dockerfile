@@ -31,8 +31,8 @@ RUN pip install .
 WORKDIR /opt/
 RUN git clone https://github.com/TheGreatfpmK/OMDT/
 
-RUN pip install matplotlib gym gurobipy pydot
-RUN apt-get update && apt-get install -y vim
+RUN pip install matplotlib gym gurobipy pydot graphviz
+RUN apt-get update && apt-get install -y vim graphviz
 
 RUN git clone https://github.com/randriu/dt-synthesis-cav-25.git cav25-experiments
 WORKDIR /opt/cav25-experiments

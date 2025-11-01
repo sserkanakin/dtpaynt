@@ -7,7 +7,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 HOST_RESULTS="${HOST_RESULTS:-${REPO_ROOT}/results}"
 TIMEOUT="${TIMEOUT:-1800}"
 PROGRESS_INTERVAL="${PROGRESS_INTERVAL:-5.0}"
-BENCHMARK_ARGS="${BENCHMARK_ARGS:---benchmark csma-3-4 --benchmark consensus-4-2 --benchmark obstacles}"
+BENCHMARK_ARGS="${BENCHMARK_ARGS:---benchmark csma-3-4 --benchmark consensus-4-2 --benchmark obstacles-depth2}"
 EXTRA_ARGS="${PAYNT_RUN_ARGS:-}" # optional extra flags forwarded to experiments-dts.py
 
 mkdir -p "${HOST_RESULTS}/logs"
@@ -24,6 +24,7 @@ cmd=(
   --timeout "${TIMEOUT}"
   --output-root /results/logs
   --progress-interval "${PROGRESS_INTERVAL}"
+  --quiet
 )
 
 if [[ -n "${BENCHMARK_ARGS}" ]]; then

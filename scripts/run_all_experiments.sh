@@ -7,7 +7,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 HOST_RESULTS="${HOST_RESULTS:-${REPO_ROOT}/results}"
 TIMEOUT="${TIMEOUT:-1800}"
 PROGRESS_INTERVAL="${PROGRESS_INTERVAL:-5.0}"
-BENCHMARK_ARGS="${BENCHMARK_ARGS:---benchmark csma-3-4 --benchmark consensus-4-2 --benchmark obstacles}"
+BENCHMARK_ARGS="${BENCHMARK_ARGS:---benchmark csma-3-4 --benchmark consensus-4-2 --benchmark obstacles-depth2}"
 HEURISTIC_ALPHA="${HEURISTIC_ALPHA:-0.1}"
 
 if [[ -z "${PAYNT_RUN_ARGS+x}" ]]; then

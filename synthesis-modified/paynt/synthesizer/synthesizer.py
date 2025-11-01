@@ -370,6 +370,28 @@ class Synthesizer:
         if print_stats:
             self.stat.print()
 
+        # Optional: export synthesized tree/policy if requested and available
+        try:
+            export_base = self.export_synthesis_filename_base
+            if export_base:
+                # Prefer an explicit best_tree (e.g., decision tree from quotient)
+                best_tree = getattr(self, "best_tree", None)
+                if best_tree is None:
+                    best_tree = getattr(getattr(self, "quotient", None), "decision_tree", None)
+                if best_tree is not None and hasattr(best_tree, "to_graphviz"):
+                    tree = best_tree.to_graphviz()
+                    # Ensure parent directory exists
+                    import os
+                    parent = os.path.dirname(export_base)
+                    if parent:
+                        os.makedirs(parent, exist_ok=True)
+                    # Write .dot and render .png
+                    with open(export_base + ".dot", "w") as f:
+                        f.write(tree.source)
+                    tree.render(export_base, format="png", cleanup=True)
+        except Exception as e:
+            logger.warning(f"Failed to export synthesis tree: {e}")
+
         assignment = self.best_assignment
         if self._progress_observer is not None:
             self._emit_progress("finished")
