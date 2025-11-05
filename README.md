@@ -122,6 +122,37 @@ Key artefacts:
 
 Update `results/analysis/priority_queue_benchmark.md` with highlights drawn from these outputs before sharing results.
 
+### Stress Test (Depth-7) Reproduction
+
+To run the 1-hour “Stress Test” on csma-3-4 and consensus-4-2 with a fixed depth-7 target and generate the paper-style plots/tables:
+
+1) Launch all runs (Docker required). This executes the 5 configurations:
+  - original (DFS)
+  - modified value_only (BFS)
+  - modified value_size with α ∈ {0.01, 0.1, 0.5}
+
+  Optional environment overrides: `TIMEOUT` (default 3600), `TREE_DEPTH` (default 7).
+
+  ```bash
+  bash scripts/run_stress_test.sh
+  ```
+
+2) Produce the report artefacts (anytime plots, tables, combined scatter, strategy analysis):
+
+  ```bash
+  python3 scripts/plot_stress_test.py --logs-root results/logs --out-dir results/analysis/stress_test
+  ```
+
+Outputs are written under `results/analysis/stress_test/`:
+- `anytime_csma-3-4_depth7.png`, `anytime_consensus-4-2_depth7.png`
+- `table_final_csma-3-4.csv`, `table_final_consensus-4-2.csv`
+- `value_vs_size_combined.png`
+- `strategy_csma-3-4.png`
+
+Notes:
+- The runners forward `--add-dont-care-action` and `--tree-depth <k>` so all solvers race on the same depth-k problem.
+- Progress logs include families evaluated and frontier size for the strategy plot.
+
 ## Automated Campaigns
 
 - `./scripts/run_all_experiments.sh` builds images on demand, launches all solver variants in parallel, migrates any legacy `logs/logs` layout, and regenerates the analysis artefacts.
