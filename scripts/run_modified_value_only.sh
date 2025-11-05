@@ -34,8 +34,14 @@ if [[ -n "${BENCHMARK_ARGS}" ]]; then
 fi
 
 if [[ -n "${EXTRA_ARGS}" ]]; then
-  read -r -a extra_tokens <<< "${EXTRA_ARGS}"
-  cmd+=("${extra_tokens[@]}")
+  # If EXTRA_ARGS begins with --extra-args, keep the following string together as a single value
+  if [[ "${EXTRA_ARGS}" == --extra-args* ]]; then
+    rest="${EXTRA_ARGS#--extra-args }"
+    cmd+=("--extra-args" "${rest}")
+  else
+    read -r -a extra_tokens <<< "${EXTRA_ARGS}"
+    cmd+=("${extra_tokens[@]}")
+  fi
 fi
 
 printf -v cmd_str '%q ' "${cmd[@]}"
@@ -43,7 +49,7 @@ cmd_str=${cmd_str% }
 RUN_COMMAND=$'set -e\ncd /opt/synthesis-modified\n'"${cmd_str}"
 
 echo "[run_modified_value_only] Launching experiments..."
-docker run --rm \
+docker run --rm ${DOCKER_RUN_ARGS:-} \
   -v "${HOST_RESULTS}/logs":/results/logs \
   dtpaynt-modified \
   bash -lc "${RUN_COMMAND}"
