@@ -16,7 +16,8 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # Allow overrides via env
 HOST_RESULTS="${HOST_RESULTS:-${REPO_ROOT}/results}"
 TIMEOUT="${TIMEOUT:-3600}"
-PROGRESS_INTERVAL="${PROGRESS_INTERVAL:-5.0}"
+# More frequent progress by default
+PROGRESS_INTERVAL="${PROGRESS_INTERVAL:-1.0}"
 TREE_DEPTH="${TREE_DEPTH:-7}"
 
 # Only the two larger DTS-Q4 benchmarks

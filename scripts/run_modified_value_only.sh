@@ -6,7 +6,8 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 HOST_RESULTS="${HOST_RESULTS:-${REPO_ROOT}/results}"
 TIMEOUT="${TIMEOUT:-1800}"
-PROGRESS_INTERVAL="${PROGRESS_INTERVAL:-5.0}"
+# Default to more frequent progress
+PROGRESS_INTERVAL="${PROGRESS_INTERVAL:-1.0}"
 BENCHMARK_ARGS="${BENCHMARK_ARGS:---benchmark csma-3-4 --benchmark consensus-4-2 --benchmark obstacles-depth2}"
 EXTRA_ARGS="${PAYNT_RUN_ARGS:-}" # optional extra flags forwarded to experiments-dts.py
 
@@ -25,8 +26,14 @@ cmd=(
   --output-root /results/logs
   --progress-interval "${PROGRESS_INTERVAL}"
   --heuristic value_only
-  --quiet
 )
+
+# Control verbosity via VERBOSE env (1 -> verbose; default -> quiet)
+if [[ "${VERBOSE:-0}" == "1" ]]; then
+  cmd+=( --verbose )
+else
+  cmd+=( --quiet )
+fi
 
 if [[ -n "${BENCHMARK_ARGS}" ]]; then
   read -r -a bench_tokens <<< "${BENCHMARK_ARGS}"
@@ -49,9 +56,32 @@ cmd_str=${cmd_str% }
 RUN_COMMAND=$'set -e\ncd /opt/synthesis-modified\n'"${cmd_str}"
 
 echo "[run_modified_value_only] Launching experiments..."
-docker run --rm ${DOCKER_RUN_ARGS:-} \
-  -v "${HOST_RESULTS}/logs":/results/logs \
-  dtpaynt-modified \
-  bash -lc "${RUN_COMMAND}"
+# Use external timeout to ensure the container is terminated after TIMEOUT seconds if needed
+if command -v timeout >/dev/null 2>&1; then
+  CIDDIR=$(mktemp -d)
+  CIDFILE="${CIDDIR}/cid"
+  docker run --cidfile "${CIDFILE}" --rm ${DOCKER_RUN_ARGS:-} \
+    -v "${HOST_RESULTS}/logs":/results/logs \
+    dtpaynt-modified \
+    bash -lc "${RUN_COMMAND}" &
+  DOCKER_PID=$!
+  ( sleep "${TIMEOUT}"; if [ -f "${CIDFILE}" ]; then CID=$(cat "${CIDFILE}"); if [ -n "$CID" ]; then docker kill "$CID" >/dev/null 2>&1 || true; fi; fi ) &
+  WATCH_PID=$!
+  set +e
+  wait $DOCKER_PID
+  STATUS=$?
+  set -e
+  kill $WATCH_PID 2>/dev/null || true
+  rm -rf "${CIDDIR}"
+  if [[ $STATUS -ne 0 ]]; then
+    echo "[run_modified_value_only] Container exited with status $STATUS" >&2
+    exit $STATUS
+  fi
+else
+  docker run --rm ${DOCKER_RUN_ARGS:-} \
+    -v "${HOST_RESULTS}/logs":/results/logs \
+    dtpaynt-modified \
+    bash -lc "${RUN_COMMAND}"
+fi
 
 echo "[run_modified_value_only] Completed. Logs stored under ${HOST_RESULTS}/logs/modified_value_only"
