@@ -205,6 +205,10 @@ def create_summary_table(data: Dict[str, Dict[str, pd.DataFrame]], output_dir: P
             tree_size = df['tree_size'].dropna()
             final_tree_size = int(tree_size.iloc[-1]) if not tree_size.empty else None
             
+            # Tree depth
+            tree_depth = df['tree_depth'].dropna()
+            final_tree_depth = int(tree_depth.iloc[-1]) if not tree_depth.empty else None
+            
             rows.append({
                 'Algorithm': ALGO_LABELS.get(algo, algo),
                 'Benchmark': bench,
@@ -215,6 +219,7 @@ def create_summary_table(data: Dict[str, Dict[str, pd.DataFrame]], output_dir: P
                 'Max Frontier Size': max_frontier if max_frontier is not None else 'N/A',
                 'Final Frontier': final_frontier if final_frontier is not None else 'N/A',
                 'Tree Size': final_tree_size if final_tree_size is not None else 'N/A',
+                'Tree Depth': final_tree_depth if final_tree_depth is not None else 'N/A',
             })
     
     if rows:
@@ -222,6 +227,175 @@ def create_summary_table(data: Dict[str, Dict[str, pd.DataFrame]], output_dir: P
         output_dir.mkdir(parents=True, exist_ok=True)
         summary_df.to_csv(output_dir / 'comprehensive_summary.csv', index=False)
         print(f"Created summary table: {output_dir / 'comprehensive_summary.csv'}")
+
+
+def generate_scatter_plots(data: Dict[str, Dict[str, pd.DataFrame]], output_dir: Path):
+    """Generate scatter plots comparing algorithms."""
+    if plt is None:
+        return
+    
+    # Collect data for scatter plots
+    records = []
+    for algo in data.keys():
+        for bench in data[algo].keys():
+            df = data[algo][bench]
+            
+            best_value = df['best_value'].dropna()
+            final_best = float(best_value.iloc[-1]) if not best_value.empty else None
+            
+            # Time to best
+            if final_best is not None:
+                best_rows = df[df['best_value'] == final_best]
+                time_to_best = float(best_rows['timestamp'].min()) if not best_rows.empty else None
+            else:
+                time_to_best = None
+            
+            families = df['families_evaluated'].dropna()
+            final_families = int(families.iloc[-1]) if not families.empty else None
+            
+            frontier = df['frontier_size'].dropna()
+            max_frontier = int(frontier.max()) if not frontier.empty else None
+            
+            if time_to_best and final_families and max_frontier:
+                records.append({
+                    'algorithm': algo,
+                    'benchmark': bench,
+                    'time_to_best': time_to_best,
+                    'families': final_families,
+                    'max_frontier': max_frontier,
+                    'best_value': final_best
+                })
+    
+    if not records:
+        return
+    
+    scatter_df = pd.DataFrame(records)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Plot 1: Time vs Families Evaluated
+    fig, ax = plt.subplots(figsize=(10, 6))
+    for algo in sorted(scatter_df['algorithm'].unique()):
+        subset = scatter_df[scatter_df['algorithm'] == algo]
+        color = ALGO_COLORS.get(algo, None)
+        label = ALGO_LABELS.get(algo, algo)
+        ax.scatter(subset['families'], subset['time_to_best'], 
+                  label=label, color=color, s=100, alpha=0.7, edgecolors='black')
+    
+    ax.set_xlabel('Families Evaluated', fontsize=12)
+    ax.set_ylabel('Time to Best Solution (s)', fontsize=12)
+    ax.set_title('Efficiency: Families Evaluated vs Time', fontsize=14, fontweight='bold')
+    ax.legend(loc='best')
+    ax.grid(True, alpha=0.3, linestyle='--')
+    plt.tight_layout()
+    fig.savefig(output_dir / 'scatter_families_vs_time.png', dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    print(f"  Created scatter plot: families vs time")
+    
+    # Plot 2: Memory (frontier) vs Time
+    fig, ax = plt.subplots(figsize=(10, 6))
+    for algo in sorted(scatter_df['algorithm'].unique()):
+        subset = scatter_df[scatter_df['algorithm'] == algo]
+        color = ALGO_COLORS.get(algo, None)
+        label = ALGO_LABELS.get(algo, algo)
+        ax.scatter(subset['max_frontier'], subset['time_to_best'],
+                  label=label, color=color, s=100, alpha=0.7, edgecolors='black')
+    
+    ax.set_xlabel('Max Frontier Size (Memory)', fontsize=12)
+    ax.set_ylabel('Time to Best Solution (s)', fontsize=12)
+    ax.set_title('Memory vs Time Trade-off', fontsize=14, fontweight='bold')
+    ax.legend(loc='best')
+    ax.grid(True, alpha=0.3, linestyle='--')
+    plt.tight_layout()
+    fig.savefig(output_dir / 'scatter_frontier_vs_time.png', dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    print(f"  Created scatter plot: frontier vs time")
+
+
+def create_comparison_matrix(data: Dict[str, Dict[str, pd.DataFrame]], output_dir: Path):
+    """Create a comparison matrix showing which algorithm is best for each metric."""
+    
+    benchmarks = set()
+    for algo_data in data.values():
+        benchmarks.update(algo_data.keys())
+    
+    if not benchmarks:
+        return
+    
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    with open(output_dir / 'winner_analysis.txt', 'w') as f:
+        f.write("=" * 80 + "\n")
+        f.write("ALGORITHM PERFORMANCE WINNERS BY METRIC\n")
+        f.write("=" * 80 + "\n\n")
+        
+        for bench in sorted(benchmarks):
+            f.write(f"\n{'='*80}\n")
+            f.write(f"BENCHMARK: {bench}\n")
+            f.write(f"{'='*80}\n\n")
+            
+            # Collect metrics for this benchmark
+            results = {}
+            for algo in data.keys():
+                if bench not in data[algo]:
+                    continue
+                df = data[algo][bench]
+                
+                best_value = df['best_value'].dropna()
+                final_best = float(best_value.iloc[-1]) if not best_value.empty else None
+                
+                if final_best:
+                    best_rows = df[df['best_value'] == final_best]
+                    time_to_best = float(best_rows['timestamp'].min())
+                else:
+                    time_to_best = float('inf')
+                
+                families = df['families_evaluated'].dropna()
+                final_families = int(families.iloc[-1]) if not families.empty else float('inf')
+                
+                frontier = df['frontier_size'].dropna()
+                max_frontier = int(frontier.max()) if not frontier.empty else float('inf')
+                
+                results[algo] = {
+                    'time': time_to_best,
+                    'families': final_families,
+                    'frontier': max_frontier,
+                    'value': final_best if final_best else 0
+                }
+            
+            if not results:
+                continue
+            
+            # Find winners
+            fastest = min(results.items(), key=lambda x: x[1]['time'])
+            fewest_families = min(results.items(), key=lambda x: x[1]['families'])
+            smallest_frontier = min(results.items(), key=lambda x: x[1]['frontier'])
+            best_value = max(results.items(), key=lambda x: x[1]['value'])
+            
+            f.write(f"🏆 FASTEST (Time to Solution):\n")
+            f.write(f"   {ALGO_LABELS.get(fastest[0], fastest[0])}: {fastest[1]['time']:.2f}s\n\n")
+            
+            f.write(f"🏆 MOST EFFICIENT (Fewest Family Evaluations):\n")
+            f.write(f"   {ALGO_LABELS.get(fewest_families[0], fewest_families[0])}: {fewest_families[1]['families']} families\n\n")
+            
+            f.write(f"🏆 LOWEST MEMORY (Smallest Frontier):\n")
+            f.write(f"   {ALGO_LABELS.get(smallest_frontier[0], smallest_frontier[0])}: {smallest_frontier[1]['frontier']} nodes\n\n")
+            
+            f.write(f"🏆 BEST VALUE:\n")
+            f.write(f"   {ALGO_LABELS.get(best_value[0], best_value[0])}: {best_value[1]['value']:.6f}\n\n")
+            
+            # Full rankings
+            f.write(f"\nFULL RANKINGS:\n")
+            f.write(f"-" * 80 + "\n")
+            f.write(f"{'Algorithm':<40} {'Time (s)':<12} {'Families':<12} {'Frontier':<12}\n")
+            f.write(f"-" * 80 + "\n")
+            for algo in sorted(results.keys()):
+                label = ALGO_LABELS.get(algo, algo)
+                time_val = f"{results[algo]['time']:.2f}" if results[algo]['time'] != float('inf') else "N/A"
+                families_val = f"{results[algo]['families']}" if results[algo]['families'] != float('inf') else "N/A"
+                frontier_val = f"{results[algo]['frontier']}" if results[algo]['frontier'] != float('inf') else "N/A"
+                f.write(f"{label:<40} {time_val:<12} {families_val:<12} {frontier_val:<12}\n")
+    
+    print(f"Created winner analysis: {output_dir / 'winner_analysis.txt'}")
 
 
 def main():
@@ -249,6 +423,10 @@ def main():
     print("Creating summary table...")
     create_summary_table(data, args.output_dir)
     
+    # Generate comparison matrix and winner analysis
+    print("Creating winner analysis...")
+    create_comparison_matrix(data, args.output_dir)
+    
     # Generate bar charts for key metrics
     print("Creating bar charts...")
     metrics_to_plot = [
@@ -259,6 +437,10 @@ def main():
     for metric, title, ylabel in metrics_to_plot:
         plot_comparative_bar_chart(data, args.output_dir, metric, title, ylabel)
         print(f"  Created bar chart for {metric}")
+    
+    # Generate scatter plots
+    print("Creating scatter plots...")
+    generate_scatter_plots(data, args.output_dir)
     
     # Generate timeline plots for each benchmark
     print("Creating timeline plots...")
