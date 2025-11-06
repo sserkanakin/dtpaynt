@@ -14,6 +14,8 @@ import json
 import os
 import shutil
 import subprocess
+import signal
+import atexit
 
 import logging
 from datetime import datetime
@@ -32,10 +34,38 @@ class SynthesizerDecisionTree(paynt.synthesizer.synthesizer_ar.SynthesizerAR):
         super().__init__(*args)
         self.best_tree = None
         self.best_tree_value = None
+        self._setup_tree_export_handlers()
 
     @property
     def method_name(self):
         return "AR (decision tree)"
+
+    def _setup_tree_export_handlers(self):
+        """Setup signal handlers and atexit to export trees even on timeout."""
+        def export_tree_on_exit():
+            try:
+                if self.best_tree is not None and self.export_synthesis_filename_base is not None:
+                    logger.info("Exporting decision tree before exit...")
+                    relevant_state_valuations = [self.quotient.relevant_state_valuations[state] for state in self.quotient.state_is_relevant_bv]
+                    self.best_tree.simplify(relevant_state_valuations)
+                    self.export_decision_tree(self.best_tree, self.export_synthesis_filename_base)
+                    logger.info(f"Successfully exported tree to {self.export_synthesis_filename_base}")
+            except Exception as e:
+                logger.warning(f"Failed to export tree on exit: {e}")
+        
+        # Register atexit handler
+        atexit.register(export_tree_on_exit)
+        
+        # Register signal handlers for graceful shutdown
+        def signal_handler(signum, frame):
+            logger.info(f"Received signal {signum}, attempting to export tree...")
+            export_tree_on_exit()
+            # Re-raise to allow normal signal handling
+            signal.signal(signum, signal.SIG_DFL)
+            os.kill(os.getpid(), signum)
+        
+        signal.signal(signal.SIGTERM, signal_handler)
+        signal.signal(signal.SIGINT, signal_handler)
 
     def verify_hole_selection(self, family, hole_selection):
         spec = self.quotient.specification
@@ -133,10 +163,16 @@ class SynthesizerDecisionTree(paynt.synthesizer.synthesizer_ar.SynthesizerAR):
             os.makedirs(directory, exist_ok=True)
         with open(tree_filename, 'w') as file:
             file.write(tree.source)
+            file.flush()
+            os.fsync(file.fileno())
         logger.info(f"exported decision tree to {tree_filename}")
 
         tree_visualization_filename = export_filename_base + ".png"
         tree.render(export_filename_base, format="png", cleanup=True) # using export_filename_base since graphviz appends .png by default
+        # Ensure PNG file is synced to disk
+        if os.path.exists(tree_visualization_filename):
+            with open(tree_visualization_filename, 'rb') as f:
+                os.fsync(f.fileno())
         logger.info(f"exported decision tree visualization to {tree_visualization_filename}")
 
 

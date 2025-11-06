@@ -67,7 +67,7 @@ if command -v timeout >/dev/null 2>&1; then
     dtpaynt-modified \
     bash -lc "${RUN_COMMAND}" &
   DOCKER_PID=$!
-  ( sleep "${TIMEOUT}"; if [ -f "${CIDFILE}" ]; then CID=$(cat "${CIDFILE}"); if [ -n "$CID" ]; then docker kill "$CID" >/dev/null 2>&1 || true; fi; fi ) &
+  ( sleep "${TIMEOUT}"; if [ -f "${CIDFILE}" ]; then CID=$(cat "${CIDFILE}"); if [ -n "$CID" ]; then docker kill --signal=SIGTERM "$CID" >/dev/null 2>&1 || true; sleep 10; docker kill "$CID" >/dev/null 2>&1 || true; fi; fi ) &
   WATCH_PID=$!
   set +e
   wait $DOCKER_PID

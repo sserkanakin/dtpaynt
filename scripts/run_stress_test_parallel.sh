@@ -15,7 +15,12 @@ PROGRESS_INTERVAL="${PROGRESS_INTERVAL:-1.0}"
 TREE_DEPTH="${TREE_DEPTH:-5}"
 N_JOBS="${N_JOBS:-5}"
 
-EXTRA_ARGS=( --extra-args "--tree-depth ${TREE_DEPTH} --add-dont-care-action" )
+# If PAYNT_RUN_ARGS is already set externally, use it; otherwise build default
+if [[ -n "${PAYNT_RUN_ARGS:-}" ]]; then
+  EXTRA_ARGS=( --extra-args "${PAYNT_RUN_ARGS}" )
+else
+  EXTRA_ARGS=( --extra-args "--tree-depth ${TREE_DEPTH} --add-dont-care-action" )
+fi
 
 BENCHMARKS=( csma-3-4 consensus-4-2 )
 ALPHAS=( 0.01 0.1 0.5 )
