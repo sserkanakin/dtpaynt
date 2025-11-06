@@ -12,7 +12,7 @@ HOST_RESULTS="${HOST_RESULTS:-${REPO_ROOT}/results}"
 TIMEOUT="${TIMEOUT:-3600}"
 # Make progress updates more frequent by default
 PROGRESS_INTERVAL="${PROGRESS_INTERVAL:-1.0}"
-TREE_DEPTH="${TREE_DEPTH:-7}"
+TREE_DEPTH="${TREE_DEPTH:-5}"
 N_JOBS="${N_JOBS:-5}"
 
 EXTRA_ARGS=( --extra-args "--tree-depth ${TREE_DEPTH} --add-dont-care-action" )
