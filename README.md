@@ -172,3 +172,8 @@ Notes:
 - Run `process_results.py` to regenerate CSVs and plots after each campaign.
 - Populate the summary tables in `results/analysis/priority_queue_benchmark.md` with fresh numbers.
 - Amend `BENCHMARKS.md` and the README if new presets or workflows are introduced.
+
+
+```
+echo '[capped-restart] Killing current orchestrator and containers...'; BASE=/root/dtpaynt/results/final_full_stable_20251106-221411; if [[ -f "$BASE/pid.txt" ]]; then PID=$(cat "$BASE/pid.txt"); kill $PID 2>/dev/null || true; fi; docker ps --format '{{.ID}} {{.Image}}' | grep -E 'dtpaynt-' | awk '{print $1}' | xargs -r docker kill; NOW=$(date -u +%Y%m%d-%H%M%S); export HOST_RESULTS="/root/dtpaynt/results/all_parallel_capped_${NOW}"; mkdir -p "$HOST_RESULTS"; export TIMEOUT=1800; export N_JOBS=10; export PROGRESS_INTERVAL=1.0; export PAYNT_RUN_ARGS="--tree-depth 4 --add-dont-care-action"; export DOCKER_RUN_ARGS="--cpus=2.0 --memory=12g --memory-swap=12g"; echo "[capped] Starting at ${NOW}; results=${HOST_RESULTS}"; bash /root/dtpaynt/scripts/run_stress_test_parallel.sh > "${HOST_RESULTS}/run.log" 2>&1 & echo $! > "${HOST_RESULTS}/pid.txt"; echo "[capped] PID=$(cat ${HOST_RESULTS}/pid.txt)"; sleep 6; echo '=== Active containers after launch ==='; docker ps --format '{{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Command}}' | grep -E 'dtpaynt-' || true; echo '=== run.log head ==='; head -n 40 "${HOST_RESULTS}/run.log";
+```
