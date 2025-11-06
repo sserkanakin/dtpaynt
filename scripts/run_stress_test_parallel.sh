@@ -22,7 +22,14 @@ else
   EXTRA_ARGS=( --extra-args "--tree-depth ${TREE_DEPTH} --add-dont-care-action" )
 fi
 
-BENCHMARKS=( csma-3-4 consensus-4-2 )
+# Allow external override of benchmarks
+if [[ -n "${BENCHMARK_ARGS:-}" ]]; then
+  # Parse benchmark name from BENCHMARK_ARGS (e.g., "--benchmark consensus-4-2" -> "consensus-4-2")
+  BENCHMARKS=( $(echo "${BENCHMARK_ARGS}" | grep -oP '(?<=--benchmark )\S+') )
+  echo "[stress_parallel] Using externally specified benchmarks: ${BENCHMARKS[@]}"
+else
+  BENCHMARKS=( csma-3-4 consensus-4-2 )
+fi
 ALPHAS=( 0.01 0.1 0.5 )
 
 echo "[stress_parallel] Results directory: ${HOST_RESULTS}"

@@ -60,7 +60,13 @@ echo "[run_modified_value_only] Launching experiments..."
 if command -v timeout >/dev/null 2>&1; then
   CIDDIR=$(mktemp -d)
   CIDFILE="${CIDDIR}/cid"
-  docker run --cidfile "${CIDFILE}" --rm ${DOCKER_RUN_ARGS:-} \
+  # Optionally keep the container after exit for debugging (set DEBUG_KEEP_CONTAINER=1)
+  if [[ "${DEBUG_KEEP_CONTAINER:-0}" == "1" ]]; then
+    RM_FLAG=""
+  else
+    RM_FLAG="--rm"
+  fi
+  docker run --cidfile "${CIDFILE}" ${RM_FLAG} ${DOCKER_RUN_ARGS:-} \
     -v "${HOST_RESULTS}/logs":/results/logs \
     dtpaynt-modified \
     bash -lc "${RUN_COMMAND}" &
@@ -72,7 +78,12 @@ if command -v timeout >/dev/null 2>&1; then
   STATUS=$?
   set -e
   kill $WATCH_PID 2>/dev/null || true
-  rm -rf "${CIDDIR}"
+  # If we're debugging, keep the CID file so operator can inspect the container and copy files out.
+  if [[ "${DEBUG_KEEP_CONTAINER:-0}" != "1" ]]; then
+    rm -rf "${CIDDIR}"
+  else
+    echo "[run_modified_value_only] DEBUG_KEEP_CONTAINER=1, keeping CID file at ${CIDFILE}"
+  fi
   if [[ $STATUS -ne 0 ]]; then
     echo "[run_modified_value_only] Container exited with status $STATUS" >&2
     exit $STATUS
