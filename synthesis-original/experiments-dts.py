@@ -1,520 +1,407 @@
-#!/home/may/phd/storm/venv/bin/python
+#!/usr/bin/env python3
 
-import os
-import subprocess
-import resource
+"""Utility script to run DTPAYNT experiments with structured logging."""
+
+import json
+import shlex
 import shutil
-import sys
-import re
+import subprocess
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional, Tuple
+
 import click
-import math
-import concurrent.futures
 
-date="02-06"
-experiment_group_name = f"{date}-dtpaynt-error-01-1h"
-paynt_one = "one" in experiment_group_name
 
-new_models = True
+REPO_ROOT = Path(__file__).resolve().parents[2]
+BASE_DIR = Path(__file__).resolve().parent
+PAYNT_ENTRYPOINT = BASE_DIR / "paynt.py"
 
-##### benchmarks evaluation ######
 
-def contains_sketch(directory):
-    if not os.path.isdir(directory):
-        return False
-    # files = [ os.path.basename(f.path) for f in os.scandir(directory) if f.is_file() ]
-    # return b'sketch.templ' in files and b'sketch.props' in files
-    subdirectories = [ f.path for f in os.scandir(directory) if f.is_dir() ]
-    for x in subdirectories:
-        if "decision_trees" in x.__str__():
-            subdirectories = []
-        if ".benchmark_suite" in x.__str__():
-            subdirectories = []
-    return len(subdirectories) == 0
+DEFAULT_BENCHMARKS: Dict[str, Dict[str, str]] = {
+    "csma-3-4": {
+        "path": "models/dts-q4/csma-3-4",
+        "sketch": "model.prism",
+        "props": "model.props",
+        "extra_args": "--add-dont-care-action",
+    },
+    "consensus-4-2": {
+        "path": "models/dts-q4/consensus-4-2",
+        "sketch": "model.prism",
+        "props": "model.props",
+        "extra_args": "--add-dont-care-action",
+    },
+    "obstacles": {
+        "path": "models/mdp/obstacles",
+        "sketch": "sketch.templ",
+        "props": "sketch.props",
+        "extra_args": "--add-dont-care-action",
+    },
+    "obstacles-depth2": {
+        "path": "models/mdp/obstacles",
+        "sketch": "sketch.templ",
+        "props": "sketch.props",
+        "extra_args": "--add-dont-care-action --tree-depth 2",
+    },
+    "csma-3-4-depth3": {
+        "path": "models/dts-q4/csma-3-4",
+        "sketch": "model.prism",
+        "props": "model.props",
+        "extra_args": "--add-dont-care-action --tree-depth 3",
+    },
+    "maze-concise": {
+        "path": "models/dtmc/maze/concise",
+        "sketch": "sketch.templ",
+        "props": "sketch.props",
+        "extra_args": "",
+    },
+    "grid-easy": {
+        "path": "models/dtmc/grid/grid",
+        "sketch": "sketch.templ",
+        "props": "easy.props",
+        "extra_args": "",
+    },
+    "grid-hard": {
+        "path": "models/dtmc/grid/grid",
+        "sketch": "sketch.templ",
+        "props": "hard.props",
+        "extra_args": "",
+    },
+}
 
-def collect_sketches(directory):
-    if ".benchmark_suite" in directory.__str__() or "decision_trees" in directory.__str__():
-        return []
-    if not isinstance(directory, bytes):
-        directory = os.fsencode(directory)
-    sketches = []
-    if contains_sketch(directory):
-        sketches.append(directory.decode("utf-8"))
-    subdirectories = [ f.path for f in os.scandir(directory) if f.is_dir() ]
-    for subdirectory in subdirectories:
-        sketches += collect_sketches(subdirectory)
-    return sketches
+DEFAULT_PRESETS: List[str] = ["csma-3-4", "consensus-4-2", "obstacles"]
 
-def log_dump(what, where):
-    os.makedirs(os.path.dirname(where), exist_ok=True)
-    if isinstance(what, bytes):
-        what = what.decode("utf-8")
-    with open(where, "w") as f:
-        f.write(what)
 
-def set_memory_limit(maxmem_mb):
-    soft, hard = resource.getrlimit(resource.RLIMIT_AS)
-    resource.setrlimit(resource.RLIMIT_AS, (maxmem_mb*1024*1024, hard))
+def detect_algorithm_version() -> str:
+    parts = Path(__file__).resolve().parts
+    if "synthesis-modified" in parts:
+        return "modified"
+    if "synthesis-original" in parts:
+        return "original"
+    return "unknown"
 
-def run_paynt(paynt_dir, sketch, options, timeout_seconds, maxmem_mb, task_name, output_dir, restart:bool):
-    if os.path.isdir(output_dir) and not restart:
-        print(f"{task_name} skipped, {output_dir} already exists")
-        return
-    os.makedirs(os.path.dirname(output_dir), exist_ok=True)
 
-    options += f" --export-synthesis {output_dir}/tree"
+def default_output_root() -> Path:
+    return REPO_ROOT / "results" / "logs"
 
-    model = sketch
-    other_flags = ""
-    if new_models:
-        if "undiscounted" in model:
-            other_flags += " --sketch model.prism"
-            other_flags += " --props model.props"
-        else:
-            other_flags += " --sketch model-random.drn"
-            other_flags += " --props discounted.props"
-        other_flags += " --add-dont-care-action"
-    else:
-        if "omdt" in model:
-            other_flags += " --sketch model-random.drn"
-            other_flags += " --props discounted.props"
-        if "maze" in model:
-            other_flags += " --sketch model-random.drn"
-            other_flags += " --props discounted.props"
-        if "qcomp" in model:
-            # other_flags += " --sketch model-random-enabled.drn"
-            other_flags += " --sketch model.prism"
-            # other_flags += " --props discounted.props"
-            other_flags += " --props model.props"
-            other_flags += " --add-dont-care-action"
-            # if paynt_one:
-            #     other_flags += " --sketch model-random-enabled.drn"
-            #     other_flags += " --props discounted.props"
-            # else:
-            #     other_flags += " --sketch model.prism"
-            #     other_flags += " --props model.props"
 
-        # if not paynt_one and "qcomp" not in model:
-        #     other_flags += " --add-dont-care-action"
+def infer_files(benchmark_path: Path) -> Dict[str, str]:
+    candidates = [
+        ("model.prism", "model.props"),
+        ("model.drn", "model.props"),
+        ("model-random.drn", "discounted.props"),
+        ("sketch.templ", "sketch.props"),
+    ]
+    for sketch_name, props_name in candidates:
+        if (benchmark_path / sketch_name).exists() and (benchmark_path / props_name).exists():
+            return {"sketch": sketch_name, "props": props_name}
 
-    if paynt_one:
-        if "maze" in model or "omdt" in model:
-            other_flags += f" --tree-map-scheduler {model}/scheduler.storm.json"
-        if "qcomp" in model:
-            # other_flags += f" --tree-map-scheduler {model}/scheduler.storm.json"
-            other_flags += f" --tree-map-scheduler {model}/scheduler-random.storm.json"
-    options += other_flags
+    prism_files = list(benchmark_path.glob("*.prism"))
+    templ_files = list(benchmark_path.glob("*.templ"))
+    props_files = list(benchmark_path.glob("*.props"))
 
-    command = f"python3 {paynt_dir}/paynt.py {sketch} {options}"
-    timeout_seconds += 10 # experiment reserve
-    # use explicit option instead of preexec_fn for all-in-one
-    preexec_fn = lambda: set_memory_limit(maxmem_mb)
-    
-    timed_out = False
-    stdout = None
-    stderr = None
-    print(task_name, "started")
+    if len(props_files) == 1:
+        props_name = props_files[0].name
+        if len(prism_files) == 1:
+            return {"sketch": prism_files[0].name, "props": props_name}
+        if len(templ_files) == 1:
+            return {"sketch": templ_files[0].name, "props": props_name}
+
+    raise click.ClickException(
+        f"Unable to infer sketch/props files in {benchmark_path}. "
+        "Please specify a predefined benchmark id or ensure standard filenames exist."
+    )
+
+
+@dataclass
+class Benchmark:
+    identifier: str
+    path: Path
+    sketch: str
+    props: str
+    extra_args: List[str]
+
+
+def resolve_benchmark(identifier: str) -> Benchmark:
+    if identifier in DEFAULT_BENCHMARKS:
+        config = DEFAULT_BENCHMARKS[identifier]
+        bench_path = (BASE_DIR / config["path"]).resolve()
+        extra = shlex.split(config.get("extra_args", ""))
+        return Benchmark(identifier, bench_path, config["sketch"], config["props"], extra)
+
+    raw_path = Path(identifier)
+    bench_path = raw_path if raw_path.is_absolute() else (BASE_DIR / raw_path)
+    bench_path = bench_path.resolve()
+    if not bench_path.exists():
+        raise click.BadParameter(f"Benchmark path does not exist: {bench_path}")
+
+    inferred = infer_files(bench_path)
+    return Benchmark(bench_path.name, bench_path, inferred["sketch"], inferred["props"], [])
+
+
+def stream_subprocess(command: List[str], cwd: Path, logfile: Path, quiet: bool = True) -> int:
+    logfile.parent.mkdir(parents=True, exist_ok=True)
+    with logfile.open("w", encoding="utf-8") as stream:
+        process = subprocess.Popen(
+            command,
+            cwd=str(cwd),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        assert process.stdout is not None
+        for line in process.stdout:
+            if not quiet:
+                print(line, end="")
+            stream.write(line)
+        return process.wait()
+
+
+def _read_progress_tail(progress_csv: Path) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+    """Parse the progress CSV to extract (finish_time, best_value, time_to_best).
+    - finish_time: timestamp of the final row (seconds)
+    - best_value: last non-empty best_value encountered
+    - time_to_best: timestamp of the latest 'improvement' event
+    """
     try:
-        result = subprocess.run(command.split(), preexec_fn=preexec_fn, timeout=timeout_seconds, capture_output=True, text=True)
-        stdout = result.stdout
-        stderr = result.stderr
-    except subprocess.TimeoutExpired as e:
-        stdout = e.stdout
-        stderr = e.stderr
-    except subprocess.CalledProcessError as e:
-        print(f'Error occured: {e}')
-    except Exception as e:
-        print(f'Exception occurred: {e}')
-
-    output = ""
-    if stdout is not None and len(stdout) > 0:
-        if isinstance(stdout,str):
-            output += stdout
-        if isinstance(stdout,bytes):
-            output += stdout.decode("utf-8")
-    if stderr is not None and len(stderr) > 0:
-        if isinstance(stderr,str):
-            output += stderr
-        if isinstance(stderr,bytes):
-            output += stderr.decode("utf-8")
-    log_dump(output, f"{output_dir}/stdout.txt")
-
-
-
-def collect_tasks(models_dir, experiment_name, output_dir, restart:bool):
-    sketches = collect_sketches(models_dir)
-    experiment_dir = f"{output_dir}/{experiment_name}"
-    if os.path.isdir(experiment_dir) and restart:
-        print(f"removing existing directory {experiment_dir}")
-        shutil.rmtree(experiment_dir)
-
-    skip = []
-    # skip += ["maze"]
-    # skip += ["omdt"]
-    # skip += ["qcomp"]
-
-    current_experiment = 0
-
-    sketches = sorted(sketches)
-    sketches = [sketch for sketch in sketches if not any([k in str(sketch) for k in skip])]
-
-    tasks = []
-    for sketch in sketches:
-        model_name = os.path.basename(sketch)
-        model_group_name = os.path.basename(os.path.dirname(sketch))
-        model_name = f"{model_group_name}-{model_name}"
-        current_experiment += 1
-        task_name = f"model {current_experiment}/{len(sketches)}".ljust(16) + model_name.ljust(32)
-        task_output_dir = f"{experiment_dir}/{model_name}"
-        tasks.append((sketch,task_name,task_output_dir))
-    return tasks
+        import csv
+        finish_time: Optional[float] = None
+        last_best: Optional[float] = None
+        time_to_best: Optional[float] = None
+        with progress_csv.open("r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                # final seen timestamp
+                try:
+                    finish_time = float(row.get("timestamp") or "")
+                except Exception:
+                    pass
+                # track latest best value
+                try:
+                    v = row.get("best_value")
+                    if v not in (None, ""):
+                        last_best = float(v)
+                except Exception:
+                    pass
+                # track when the last improvement happened
+                try:
+                    if row.get("event") == "improvement":
+                        ts = float(row.get("timestamp") or "")
+                        time_to_best = ts if time_to_best is None or ts >= time_to_best else time_to_best
+                except Exception:
+                    pass
+        return finish_time, last_best, time_to_best
+    except Exception:
+        return None, None, None
 
 
-def evaluate_benchmarks(experiment_name, num_workers, paynt_dir, timeout_seconds, maxmem_mb, options, restart, output_dir):
-    models_dir = "/home/fpmk/synthesis-playground/models/dts-uai-subset"
-    tasks = collect_tasks(models_dir, experiment_name, output_dir, restart)
-    print(tasks)
-    # exit()
-    if num_workers == 1:
-        for sketch,task_name,task_output_dir in tasks:
-            run_paynt(paynt_dir, sketch, options, timeout_seconds, maxmem_mb, task_name, task_output_dir, restart)
-    else:
-        with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
-            for (sketch,task_name,task_output_dir) in tasks:
-                executor.submit(run_paynt, paynt_dir, sketch, options, timeout_seconds, maxmem_mb, task_name, task_output_dir, restart)
-
-
-##### log parsing #####
-
-def search_entry(lines, regex, conversion=str, number=-1):
-    num_groups = re.compile(regex).groups
-    assert num_groups == 1
-    entries = []
-    for line in lines:
-        match = re.search(regex, line)
-        if match is not None:
-            entry = conversion(match.group(1))
-            entries.append(entry)
-    
-    if (len(entries) == 0 and number == -1) or number >= len(entries):
+def build_metadata_string(metadata: Dict[str, str]) -> Optional[str]:
+    if not metadata:
         return None
-    return entries[number]
-
-def search_int(lines, regex, number=-1):
-    return search_entry(lines, regex, int, number)
-
-def search_float(lines, regex, number=-1):
-    return search_entry(lines, regex, float, number)
-
-def shorten_model_name(model):
-    ''' Get a shortened model name used in the paper. '''
-    model_dict = {
-        "avoid-8-2" : "av-8-2",
-        "avoid-8-2-easy" : "av-8-2-e",
-        "dodge-8-mod2-pull-30" : "dodge-2",
-        "dodge-8-mod3-pull-30" : "dodge-3",
-        "dpm-switch-q10" : "dpm-10",
-        "dpm-switch-q10-big" : "dpm-10-b",
-        "obstacles-8-6-skip" : "obs-8-6",
-        "obstacles-10-6-skip-easy" : "obs-10-6",
-        "obstacles-10-9-pull" : "obs-10-9",
-        "rover-100-big" : "rov-100",
-        "rover-1000" : "rov-1000",
-        "uav-operator-roz-workload" : "uav-work",
-    }
-    if model in model_dict:
-        model = model_dict[model]
-    return model
-
-class TableRow:
-
-    def to_string(self, spreadsheet=False, latex=False):
-        s = ""
-        if not spreadsheet:
-            is_na = lambda what,just : "N/A".ljust(just) if what is None else str(what).ljust(just)
-        else:
-            is_na = lambda what,just : "N/A;" if what is None else f"{str(what)};"
-        latex_sep = "&  " if latex else ""
-        form = lambda what,just : is_na(what,just)+latex_sep
-        s += form(self.model, 26)
-        s += form(self.variables, 6)
-        s += form(self.states, 8)
-        s += form(self.relevant_states, 2)
-        s += form(self.actions, 8)
-        s += form(self.choices, 8)
-        s += form(self.true_opt, 12)
-        s += form(self.random, 12)
-        s += form("", 2)
-
-        # s += form(self.max_depth, 12)
-        s += form(self.best, 12)
-        s += form(self.best_relative, 12)
-        # s += form(self.time_best, 12)
-        s += form(self.time, 12)
-        s += form(self.tree_nodes, 12)
-        s += form(self.tree_depth, 12)
-
-        s += form(self.dtcontrol_calls, 12)
-        s += form(self.dtcontrol_smaller, 12)
-        s += form(self.dtcontrol_recomputed_calls, 12)
-        s += form(self.dtcontrol_recomputed_smaller, 12)
-        s += form(self.paynt_calls, 12)
-        s += form(self.paynt_smaller, 12)
-        s += form(self.paynt_tree_found, 12)
-        s += form(self.all_larger, 12)
-        s += form("", 2)
-
-        s += form(self.dtcontrol_nodes, 12)
-        s += form(self.dtcontrol_depth, 12)
-
-        if paynt_one:
-            return s
-
-        # s += form(self.members, 12)
-        # s += form(self.num_families_considered,8)
-        # s += form(self.num_schedulers_preserved,8)
-        # s += form(self.num_families_model_checked,8)
-        # s += form(self.num_harmonizations,8)
-        # s += form(self.num_harmonization_succeeded,8)
-
-        return s
-
-        s += form(self.fraction_init, 8)
-        s += form(self.fraction_build, 8)
-        s += form(self.fraction_mc, 8)
-        s += form(self.fraction_consistent, 8)
-
-    def __str__(self):
-        return self.to_string(latex=False)
-
-    @classmethod
-    def header(cls):
-        r = cls()
-        r.model = "model"
-        r.variables = "vars"
-        r.states = "S"
-        r.relevant_states = "rel(S)"
-        r.actions = "Act"
-        r.choices = "choices"
-        r.true_opt = "*-opt"
-        r.random = "random"
-
-        r.best = "best"
-        r.best_relative = "best relative"
-        r.time = "time"
-        r.tree_nodes = "tree nodes"
-        r.tree_depth = "tree depth"
-
-        r.dtcontrol_calls = "DTControl calls"
-        r.dtcontrol_smaller = "DTControl smaller"
-        r.dtcontrol_recomputed_calls = "DTControl recomputed calls"	
-        r.dtcontrol_recomputed_smaller = "DTControl recomputed smaller"
-        r.paynt_calls = "DTPAYNT calls"
-        r.paynt_smaller = "DTPAYNT smaller"
-        r.paynt_tree_found = "DTPAYNT tree found"
-        r.all_larger = "both larger"
-
-        r.dtcontrol_nodes = "DTControl nodes"
-        r.dtcontrol_depth = "DTControl depth"
-
-        # r.members = "|M|"
-        # r.num_families_considered = "F"
-        # r.num_schedulers_preserved = "Fs="
-        # r.num_families_model_checked = "F?"
-        # r.num_harmonizations = "H?"
-        # r.num_harmonization_succeeded = "H+"
-
-        # r.fraction_init = "init%"
-        # r.fraction_build = "build%"
-        # r.fraction_mc = "MC%"
-        # r.fraction_consistent = "cons%"
-
-        return r
-
-
-def create_table_row(model, path, latex=False):
-    
-    log = f"{path}/{model}/stdout.txt"
-    def float_pretty(x,digits=4):
-        if x is None:
-            return x
-        else:
-            return round(x,digits)
-
-    def percent_pretty(x):
-        if x is None or x < 0.01:
-            return "0"
-        else:
-            return float_pretty(x,1)
-
-    assert os.path.isfile(log)
-
-    with open(log, "r") as f:
-        lines = f.readlines()
-    r = TableRow()
-
-
-    r.model = shorten_model_name(model).replace("run-1-","")
-    r.variables = search_int(lines, r"found the following (.*?) variables")
-    r.states = search_int(lines, r"explicit quotient having (.*?) states and .*? choices")
-    r.actions = search_int(lines, r"MDP has (\d+) actions")
-    r.choices = search_int(lines, r"explicit quotient having .*? states and (.*?) choices")
-
-    r.relevant_states = float_pretty(search_int(lines, r"MDP has (\d+)/.*? relevant states") / r.states * 100)
-    r.true_opt = float_pretty(search_float(lines, r"optimal scheduler has value: (.*?)$"))
-    r.random = float_pretty(search_float(lines, r"the random scheduler has value: (.*?)$"))
-
-    # r.max_depth = search_int(lines, r"building tree of depth (\d+)")
-    # r.members = search_entry(lines, r"synthesis initiated, design space: (.*?)$")
-
-    # r.timeout = "TO" if search_entry(lines, r"(time limit reached)") is not None else "-"
-    # r.best = float_pretty(search_float(lines, r"value (.*?) achieved after .*? seconds"))
-    r.best = float_pretty(search_float(lines, r"the synthesized tree has value (.*?)\n"))
-    r.best_relative = float_pretty(search_float(lines, r"the synthesized tree has relative value: (.*?)\n"))
-    r.time = float_pretty(search_float(lines, r"synthesis finished after (.*?) seconds$"))
-    r.tree_nodes = search_int(lines, r"synthesized tree of depth \d+ with (\d+) decision nodes")
-    r.tree_depth = search_int(lines, r"synthesized tree of depth (\d+) with \d+ decision nodes")
-
-    r.dtcontrol_calls = search_int(lines, r"dtcontrol calls: (\d+)$")
-    r.dtcontrol_smaller = search_int(lines, r"dtcontrol successes: (\d+)$")
-    r.dtcontrol_recomputed_calls = search_int(lines, r"dtcontrol recomputed calls: (\d+)$")
-    r.dtcontrol_recomputed_smaller = search_int(lines, r"dtcontrol recomputed successes: (\d+)$")
-    r.paynt_calls = search_int(lines, r"paynt calls: (\d+)$")
-    r.paynt_smaller = search_int(lines, r"paynt successes smaller: (\d+)$")
-    r.paynt_tree_found = search_int(lines, r"paynt tree found: (\d+)$")
-    r.all_larger = search_int(lines, r"all larger: (\d+)$")
-
-    r.dtcontrol_nodes = search_int(lines, r"initial external tree has depth .*? and (.*?) nodes")
-    r.dtcontrol_depth = search_int(lines, r"initial external tree has depth (.*?) and .*? nodes")
-
-    # r.num_families_considered = search_int(lines, r"families considered: (\d+)")
-    # r.num_schedulers_preserved = search_int(lines, r"families with schedulers preserved: (\d+)")
-    # r.num_families_model_checked = search_int(lines, r"families model checked: (\d+)")
-    # r.num_harmonizations = search_int(lines, r"harmonizations attempted: (\d+)")
-    # r.num_harmonization_succeeded = search_int(lines, r"harmonizations succeeded: (\d+)")
-
-    # r.fraction_init = percent_pretty(search_float(lines, r"^(.*?) \%.*?set_depth\)$"))
-    # r.fraction_build = percent_pretty(search_float(lines, r"^(.*?) \%.*?build\)$"))
-    # r.fraction_mc = percent_pretty(search_float(lines, r"^(.*?) \%.*?_model_checking_sparse_engine.$"))
-    # r.fraction_consistent = percent_pretty(search_float(lines, r"^(.*?) \%.*?are_choices_consistent\)$"))
-    
-    return r
-
-
-def show_experiment(name, output_dir, spreadsheet=False):
-    path = f"{output_dir}/{name}"
-    
-    models = [f for f in os.scandir(path) if f.is_dir()]
-    models = [os.path.basename(m.path) for m in models]
-    models = sorted(models)
-
-    i1 = [i for i,model in enumerate(models) if "4x4" in model][0]
-    i2 = [i for i,model in enumerate(models) if "8x8" in model][0]
-    model = models[i1]; models[i1] = models[i2]; models[i2] = model
-
-    rows = []
-    for model in models:
-        rows.append(create_table_row(model, path))
-
-    print(TableRow.header().to_string(spreadsheet=spreadsheet))
-    for row in rows:
-        for depth,_ in enumerate(row.depth_info):
-            if depth == 0: continue
-            print(row.to_string_depth(spreadsheet=spreadsheet,depth=depth))
-
-
-def show_experiment_group(group, output_dir, spreadsheet=False):
-
-
-    group_path = f"{output_dir}/{group}"
-    experiments = [os.path.basename(f.path) for f in os.scandir(group_path) if f.is_dir()]
-    experiments = sorted(experiments)
-    assert len(experiments) > 0
-    for experiment in experiments:
-        models = [os.path.basename(f.path) for f in os.scandir(f"{group_path}/{experiment}") if f.is_dir()]
-        break
-    models = sorted(models)
-
-    # i1 = [i for i,model in enumerate(models) if "12x12" in model][0]
-    # i2 = [i for i,model in enumerate(models) if "4x4" in model][0]
-    # model = models[i1]; models[i1] = models[i2]; models[i2] = model
-
-    # i1 = [i for i,model in enumerate(models) if "12x12" in model][0]
-    # i2 = [i for i,model in enumerate(models) if "8x8" in model][0]
-    # model = models[i1]; models[i1] = models[i2]; models[i2] = model
-
-    rows = []
-    for model in models:
-        for experiment in experiments:
-            rows.append(create_table_row(model, f"{group_path}/{experiment}"))
-
-    print(TableRow.header().to_string(spreadsheet=spreadsheet))
-    for row in rows:
-        print(row.to_string(spreadsheet=spreadsheet))
-
-def show_experiment_one(name, output_dir, spreadsheet=False):    
-    path = f"{output_dir}/{name}"
-    
-    models = [f for f in os.scandir(path) if f.is_dir()]
-    models = [os.path.basename(m.path) for m in models]
-    models = sorted(models)
-
-    if any(["8x8" in model for model in models]):
-        i1 = [i for i,model in enumerate(models) if "8x8" in model][0]
-        i2 = [i for i,model in enumerate(models) if "12x12" in model][0]
-        model = models[i1]; models[i1] = models[i2]; models[i2] = model
-
-    rows = []
-    for model in models:
-        rows.append(create_table_row(model, path))
-
-    print(TableRow.header().to_string(spreadsheet=spreadsheet))
-    for row in rows:
-        print(row.to_string(spreadsheet=spreadsheet))
-
+    parts = [f"{key}={value}" for key, value in metadata.items()]
+    return ",".join(parts)
 
 
 @click.command()
-@click.option('--paynt-dir', type=str, default="/home/may/synthesis", show_default=True, help='Path to the Paynt root folder.')
-# @click.option('--paynt-dir', type=str, default="/opt/paynt", show_default=True, help='Path to the Paynt root folder.')
-@click.option('--workers', type=int, default=8, show_default=True, help='Number of parallel tests.')
-@click.option('--timeout', type=int, default=1200, show_default=True, help='Time limit for abstraction refinement (per model), seconds.')
-@click.option('--maxmem', type=int, default=16, show_default=True, help='Memory limit, GB.')
-@click.option('--output', type=str, default="logs", show_default=True, help='Name for the output logs folder.')
-@click.option('--restart', is_flag=True, help='Re-run all benchmarks.')
-def main(paynt_dir, workers, timeout, maxmem, output, restart):
+@click.option(
+    "--benchmark",
+    "benchmarks",
+    multiple=True,
+    help="Benchmark identifier or path. If omitted, all defaults are executed.",
+)
+@click.option("--timeout", type=int, default=600, show_default=True, help="Timeout per run in seconds.")
+@click.option(
+    "--output-root",
+    type=click.Path(file_okay=False, dir_okay=True, resolve_path=True),
+    default=None,
+    help="Directory in which experiment artefacts will be stored.",
+)
+@click.option(
+    "--progress-interval",
+    type=float,
+    default=5.0,
+    show_default=True,
+    help="Seconds between periodic progress log rows.",
+)
+@click.option(
+    "--extra-args",
+    type=str,
+    default="",
+    help="Additional arguments forwarded to paynt.py (quoted string).",
+)
+@click.option("--force", is_flag=True, help="Do not skip runs if a destination folder already exists.")
+@click.option(
+    "--quiet/--verbose",
+    default=True,
+    help="Suppress PAYNT stdout; only print run starts and a structured summary.",
+)
+@click.option("--list", "list_defaults", is_flag=True, help="List available default benchmarks and exit.")
+def main(
+    benchmarks: Iterable[str],
+    timeout: int,
+    output_root: Optional[str],
+    progress_interval: float,
+    extra_args: str,
+    force: bool,
+    quiet: bool,
+    list_defaults: bool,
+):
+    """Execute PAYNT experiments with structured progress logging."""
 
+    algorithm_version = detect_algorithm_version()
 
-    profiling = ""
-    # profiling = " --profiling"
-    tree_enumeration = ""
-    # tree_enumeration = " --tree-enumeration"
-    
-    depth_min = 1
-    depth_max = 2
-    # experiments = [
-    #     (f"{experiment_group_name}/{depth}", f"{profiling} --tree-depth={depth} {tree_enumeration}", timeout) for depth in range(depth_min,depth_max+1)
-    # ]
-    experiments = [
-        (f"{experiment_group_name}/integration", f"--add-dont-care-action --tree-enumeration --tree-depth 10", timeout)
-    ]
+    if list_defaults:
+        click.echo("Available benchmark presets:")
+        for key, info in DEFAULT_BENCHMARKS.items():
+            extra = info.get("extra_args")
+            suffix = f", extra_args=\"{extra}\"" if extra else ""
+            default_tag = " (default)" if key in DEFAULT_PRESETS else ""
+            click.echo(
+                f"  - {key}: {info['path']} (sketch={info['sketch']}, props={info['props']}{suffix}){default_tag}"
+            )
+        return
 
-    if paynt_one:
-        depth_max = 20
-        experiments = [(f"{experiment_group_name}", f"{profiling} --tree-depth={depth_max}", timeout)]
-
-    for index,experiment in enumerate(experiments):
-        name,options,timeout_sec = experiment
-        maxmem_mb = maxmem*1024
-        print(f"----- experiment {index+1}/{len(experiments)}: {name} -----")
-        evaluate_benchmarks(name, workers, paynt_dir, timeout_sec, maxmem_mb, options, restart, output)
-
-    # exit()
-    if not paynt_one:
-        show_experiment_group(experiment_group_name, output, spreadsheet=True)
+    benchmarks_to_run: List[Benchmark] = []
+    if benchmarks:
+        for identifier in benchmarks:
+            benchmarks_to_run.append(resolve_benchmark(identifier))
     else:
-        for experiment_name,_,_ in experiments:
-            show_experiment_one(experiment_name, output, spreadsheet=True)
+        for identifier in DEFAULT_PRESETS:
+            benchmarks_to_run.append(resolve_benchmark(identifier))
+
+    output_directory = Path(output_root) if output_root else default_output_root()
+    target_root = output_directory / algorithm_version
+    target_root.mkdir(parents=True, exist_ok=True)
+
+    extra_args_list = shlex.split(extra_args)
+
+    summary: List[Dict[str, str]] = []
+
+    for benchmark in benchmarks_to_run:
+        # Use timezone-aware UTC timestamps (avoid deprecated utcnow)
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        run_id = f"{benchmark.identifier}-{timestamp}"
+        run_dir = target_root / benchmark.identifier / run_id
+
+        if run_dir.exists():
+            if force:
+                click.echo(f"Removing existing directory {run_dir} due to --force flag.")
+                shutil.rmtree(run_dir)
+            else:
+                click.echo(f"Skipping {benchmark.identifier}: destination {run_dir} already exists.")
+                continue
+
+        progress_log = run_dir / "progress.csv"
+        stdout_log = run_dir / "stdout.txt"
+        export_base = run_dir / "tree"
+
+        metadata = {
+            "algorithm_version": algorithm_version,
+            "benchmark_name": benchmark.identifier,
+            "run_id": run_id,
+        }
+        metadata_string = build_metadata_string(metadata)
+
+        command: List[str] = [
+            str(PAYNT_ENTRYPOINT),
+            str(benchmark.path),
+            "--sketch",
+            benchmark.sketch,
+            "--props",
+            benchmark.props,
+            "--timeout",
+            str(timeout),
+            "--progress-log",
+            str(progress_log),
+            "--progress-interval",
+            str(progress_interval),
+            "--export-synthesis",
+            str(export_base),
+        ]
+        if metadata_string:
+            command.extend(["--progress-metadata", metadata_string])
+
+        combined_extra_args = benchmark.extra_args + extra_args_list
+        command.extend(combined_extra_args)
+
+        # ensure run directory exists before command execution
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        run_info = {
+            "benchmark_id": benchmark.identifier,
+            "benchmark_path": str(benchmark.path),
+            "sketch": benchmark.sketch,
+            "props": benchmark.props,
+            "timeout": timeout,
+            "progress_interval": progress_interval,
+            "algorithm_version": algorithm_version,
+            "progress_log": str(progress_log),
+            "stdout_log": str(stdout_log),
+            "benchmark_extra_args": benchmark.extra_args,
+            "cli_extra_args": extra_args_list,
+            "extra_args": combined_extra_args,
+            "command": command,
+            "timestamp_utc": timestamp,
+        }
+
+        with (run_dir / "run-info.json").open("w", encoding="utf-8") as info_file:
+            json.dump(run_info, info_file, indent=2)
+
+        click.echo("")
+        click.echo(f"Running {benchmark.identifier} (timeout={timeout}s)...")
+        exit_code = stream_subprocess(["python3"] + command, BASE_DIR, stdout_log, quiet=quiet)
+        if exit_code != 0:
+            raise click.ClickException(
+                f"PAYNT execution failed for {benchmark.identifier} with exit code {exit_code}."
+            )
+
+        finish_time, best_value, time_to_best = _read_progress_tail(progress_log)
+        summary.append(
+            {
+                "benchmark": benchmark.identifier,
+                "run_dir": str(run_dir),
+                "progress_log": str(progress_log),
+                "timeout": timeout,
+                "finish_time": finish_time,
+                "best_value": best_value,
+                "time_to_best": time_to_best,
+                "extra_args": " ".join(combined_extra_args),
+            }
+        )
+
+    if summary:
+        headers = [
+            "benchmark",
+            "algorithm",
+            "finish_time(s)",
+            "time_to_best(s)",
+            "best_value",
+            "timeout(s)",
+            "run_dir",
+        ]
+        rows: List[List[str]] = []
+        for r in summary:
+            rows.append([
+                r.get("benchmark", ""),
+                algorithm_version,
+                "{:.3f}".format(r["finish_time"]) if isinstance(r.get("finish_time"), float) else "",
+                "{:.3f}".format(r["time_to_best"]) if isinstance(r.get("time_to_best"), float) else "",
+                "{:.6f}".format(r["best_value"]) if isinstance(r.get("best_value"), float) else "",
+                str(r.get("timeout", "")),
+                r.get("run_dir", ""),
+            ])
+        colw = [max(len(h), *(len(row[i]) for row in rows)) for i, h in enumerate(headers)]
+        def fmt(row: List[str]) -> str:
+            return "| " + " | ".join(val.ljust(colw[i]) for i, val in enumerate(row)) + " |"
+        click.echo("")
+        click.echo(fmt(headers))
+        click.echo("|-" + "-|-".join("-" * w for w in colw) + "-|")
+        for row in rows:
+            click.echo(fmt(row))
+    else:
+        click.echo("No experiments were executed.")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

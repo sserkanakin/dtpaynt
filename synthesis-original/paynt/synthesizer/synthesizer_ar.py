@@ -97,6 +97,7 @@ class SynthesizerAR(paynt.synthesizer.synthesizer.Synthesizer):
             self.stat.iteration(family.mdp)
 
         self.check_specification(family)
+        self._maybe_update_lower_bound(family)
 
     def update_optimum(self, family):
         ia = family.analysis_result.improving_assignment
@@ -104,6 +105,7 @@ class SynthesizerAR(paynt.synthesizer.synthesizer.Synthesizer):
             return
         if not self.quotient.specification.has_optimality:
             self.best_assignment = ia
+            self.best_tree = getattr(self.quotient, "decision_tree", None)
             return
         iv = family.analysis_result.improving_value
         if not self.quotient.specification.optimality.improves_optimum(iv):
@@ -111,9 +113,21 @@ class SynthesizerAR(paynt.synthesizer.synthesizer.Synthesizer):
         self.quotient.specification.optimality.update_optimum(iv)
         self.best_assignment = ia
         self.best_assignment_value = iv
-        logger.info(f"value {round(iv,4)} achieved after {round(paynt.utils.timer.GlobalTimer.read(),2)} seconds")
+        self.best_tree = getattr(self.quotient, "decision_tree", None)
+        
+        # Safely log with timer check
+        elapsed_time = 0
+        try:
+            if paynt.utils.timer.GlobalTimer.global_timer is not None:
+                elapsed_time = paynt.utils.timer.GlobalTimer.read()
+        except Exception:
+            pass
+
+        logger.info(f"value {round(iv,4)} achieved after {round(elapsed_time,2)} seconds")
         if isinstance(self.quotient, paynt.quotient.pomdp.PomdpQuotient):
             self.stat.new_fsc_found(family.analysis_result.improving_value, ia, self.quotient.policy_size(ia))
+        self._increment_improvements()
+        self._emit_progress("improvement")
 
     def synthesize_one(self, family):
         families = [family]
@@ -121,13 +135,18 @@ class SynthesizerAR(paynt.synthesizer.synthesizer.Synthesizer):
         iteration_count = 0
 
         while families:
+            self._note_frontier_size(len(families))
             if self.resource_limit_reached():
                 break
+            self.maybe_emit_periodic_progress()
             family = families.pop(-1)
 
-            print(f"[Depth-First] Iteration {iteration_count}, Processing family: {family}")
             iteration_count += 1
+            # Only print every 100 iterations to reduce verbosity
+            if iteration_count % 100 == 0:
+                print(f"[Depth-First] Iteration {iteration_count}")
             
+            self._increment_families_evaluated()
             self.verify_family(family)
             self.update_optimum(family)
             if not self.quotient.specification.has_optimality and self.best_assignment is not None:
@@ -139,4 +158,5 @@ class SynthesizerAR(paynt.synthesizer.synthesizer.Synthesizer):
             # undecided
             subfamilies = self.quotient.split(family)
             families = families + subfamilies
+            self._note_frontier_size(len(families))
         return self.best_assignment

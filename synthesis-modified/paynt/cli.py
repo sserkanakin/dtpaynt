@@ -11,14 +11,17 @@ import paynt.quotient.storm_pomdp_control
 import paynt.quotient.mdp
 
 import paynt.synthesizer.synthesizer
+import paynt.synthesizer.synthesizer_ar
 import paynt.synthesizer.synthesizer_cegis
 import paynt.synthesizer.policy_tree
 import paynt.synthesizer.decision_tree
+from paynt.utils.progress_logger import CsvProgressLogger
 
 import click
 import sys
 import os
 import cProfile, pstats
+from pathlib import Path
 
 import logging
 logger = logging.getLogger(__name__)
@@ -75,6 +78,21 @@ def setup_logger(log_path = None):
     default="ar", show_default=True,
     help="synthesis method"
     )
+@click.option(
+    "--heuristic",
+    type=click.Choice(["value_only", "value_size", "bounds_gap", "upper_bound"]),
+    default="value_only",
+    show_default=True,
+    help="Priority heuristic used by the AR synthesizer",
+)
+@click.option(
+    "--heuristic-alpha",
+    "heuristic_alpha",
+    type=click.FLOAT,
+    default=0.1,
+    show_default=True,
+    help="Alpha coefficient for value_size heuristic.",
+)
 
 @click.option("--disable-expected-visits", is_flag=True, default=False,
     help="do not compute expected visits for the splitting heuristic")
@@ -142,11 +160,19 @@ def setup_logger(log_path = None):
 )
 @click.option("--profiling", is_flag=True, default=False,
     help="run profiling")
+@click.option("--progress-log", type=click.Path(),
+    help="Path to a CSV file where progress updates will be appended.")
+@click.option("--progress-interval", type=float, default=5.0, show_default=True,
+    help="Seconds between periodic progress updates; set to 0 to disable.")
+@click.option("--progress-metadata", type=str,
+    help="Comma-separated key=value pairs to include with every progress row.")
 
 def paynt_run(
     project, sketch, props, relative_error, optimum_threshold, precision, exact, timeout,
     export,
     method,
+    heuristic,
+    heuristic_alpha,
     disable_expected_visits,
     fsc_synthesis, fsc_memory_size, posterior_aware,
     storm_pomdp, iterative_storm, get_storm_result, storm_options, prune_storm,
@@ -158,7 +184,10 @@ def paynt_run(
     constraint_bound,
     dt_setting,
     ce_generator,
-    profiling
+    profiling,
+    progress_log,
+    progress_interval,
+    progress_metadata
 ):
 
     profiler = None
@@ -168,6 +197,28 @@ def paynt_run(
     paynt.utils.timer.GlobalTimer.start(timeout)
 
     logger.info("This is Paynt version {}.".format(version()))
+
+    def _parse_progress_metadata(raw: str):
+        metadata = {}
+        if not raw:
+            return metadata
+        entries = [entry.strip() for entry in raw.split(",") if entry.strip()]
+        for entry in entries:
+            if "=" in entry:
+                key, value = entry.split("=", 1)
+            else:
+                key, value = entry, ""
+            metadata[key.strip()] = value.strip()
+        return metadata
+
+    progress_metadata_dict = _parse_progress_metadata(progress_metadata)
+    default_version = "modified" if "synthesis-modified" in Path(__file__).resolve().parts else "original"
+    progress_metadata_dict.setdefault("algorithm_version", default_version)
+    project_path = Path(project).resolve()
+    progress_metadata_dict.setdefault("benchmark_name", project_path.name)
+    progress_metadata_dict.setdefault("heuristic", heuristic)
+    if heuristic == "value_size":
+        progress_metadata_dict.setdefault("heuristic_alpha", str(heuristic_alpha))
 
     # set CLI parameters
     paynt.quotient.quotient.Quotient.disable_expected_visits = disable_expected_visits
@@ -184,6 +235,11 @@ def paynt_run(
     paynt.synthesizer.decision_tree.SynthesizerDecisionTree.tree_enumeration = tree_enumeration
     paynt.synthesizer.decision_tree.SynthesizerDecisionTree.scheduler_path = tree_map_scheduler
     paynt.quotient.mdp.MdpQuotient.add_dont_care_action = add_dont_care_action
+
+    paynt.synthesizer.synthesizer_ar.SynthesizerAR.configure_heuristic(
+        heuristic=heuristic,
+        alpha=heuristic_alpha,
+    )
 
     storm_control = None
     if storm_pomdp:
@@ -202,6 +258,34 @@ def paynt_run(
         tree_helper_path = None
     quotient = paynt.parser.sketch.Sketch.load_sketch(sketch_path, properties_path, export, relative_error, precision, constraint_bound, tree_helper_path, exact)
     synthesizer = paynt.synthesizer.synthesizer.Synthesizer.choose_synthesizer(quotient, method, fsc_synthesis, storm_control)
+    if progress_log:
+        interval = None if progress_interval is None or progress_interval <= 0 else float(progress_interval)
+        fieldnames = [
+            "timestamp",
+            "best_value",
+            "tree_size",
+            "tree_depth",
+            "frontier_size",
+            "families_evaluated",
+            "improvement_count",
+            "lower_bound",
+            "event",
+        ]
+        for key in progress_metadata_dict.keys():
+            if key not in fieldnames:
+                fieldnames.append(key)
+        progress_writer = CsvProgressLogger(progress_log, fieldnames)
+
+        def _progress_callback(row):
+            progress_writer.write_row(row)
+
+        synthesizer.set_progress_observer(
+            _progress_callback,
+            interval_seconds=interval,
+            metadata=progress_metadata_dict,
+        )
+    else:
+        synthesizer.set_progress_observer(None)
     synthesizer.run(optimum_threshold)
 
     if profiling:

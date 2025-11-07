@@ -85,11 +85,17 @@ class SynthesizerMultiCoreAR(SynthesizerAR):
             profiler = cProfile.Profile()
             profiler.enable()
 
-        # create a pool of processes
-        # by default, os.cpu_count() processes will be spawned
-        with multiprocessing.Pool(
-            # processes=1
-        ) as pool:
+        # Determine worker count from env or default to cpu_count
+        procs = None
+        try:
+            env_nprocs = os.getenv("PAYNT_NPROCS")
+            if env_nprocs:
+                procs = max(1, int(env_nprocs))
+        except Exception:
+            procs = None
+
+        # create a pool of processes (defaults to os.cpu_count())
+        with multiprocessing.Pool(processes=procs) as pool:
 
             while families:
 
@@ -101,7 +107,8 @@ class SynthesizerMultiCoreAR(SynthesizerAR):
                 # work with some number of families
                 # print("submitting ", len(families), " families")
 
-                split = os.cpu_count() * 1
+                workers = procs or os.cpu_count() or 1
+                split = workers * 1
                 input_families = families[-split:]
                 input_families_size = sum([family.size for family in input_families])
                 remaining_families = families[:-split]

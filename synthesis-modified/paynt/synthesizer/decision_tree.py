@@ -14,6 +14,8 @@ import json
 import os
 import shutil
 import subprocess
+import signal
+import atexit
 
 import logging
 from datetime import datetime
@@ -32,10 +34,38 @@ class SynthesizerDecisionTree(paynt.synthesizer.synthesizer_ar.SynthesizerAR):
         super().__init__(*args)
         self.best_tree = None
         self.best_tree_value = None
+        self._setup_tree_export_handlers()
 
     @property
     def method_name(self):
         return "AR (decision tree)"
+
+    def _setup_tree_export_handlers(self):
+        """Setup signal handlers and atexit to export trees even on timeout."""
+        def export_tree_on_exit():
+            try:
+                if self.best_tree is not None and self.export_synthesis_filename_base is not None:
+                    logger.info("Exporting decision tree before exit...")
+                    relevant_state_valuations = [self.quotient.relevant_state_valuations[state] for state in self.quotient.state_is_relevant_bv]
+                    self.best_tree.simplify(relevant_state_valuations)
+                    self.export_decision_tree(self.best_tree, self.export_synthesis_filename_base)
+                    logger.info(f"Successfully exported tree to {self.export_synthesis_filename_base}")
+            except Exception as e:
+                logger.warning(f"Failed to export tree on exit: {e}")
+        
+        # Register atexit handler
+        atexit.register(export_tree_on_exit)
+        
+        # Register signal handlers for graceful shutdown
+        def signal_handler(signum, frame):
+            logger.info(f"Received signal {signum}, attempting to export tree...")
+            export_tree_on_exit()
+            # Re-raise to allow normal signal handling
+            signal.signal(signum, signal.SIG_DFL)
+            os.kill(os.getpid(), signum)
+        
+        signal.signal(signal.SIGTERM, signal_handler)
+        signal.signal(signal.SIGINT, signal_handler)
 
     def verify_hole_selection(self, family, hole_selection):
         spec = self.quotient.specification
@@ -126,18 +156,42 @@ class SynthesizerDecisionTree(paynt.synthesizer.synthesizer_ar.SynthesizerAR):
         print()
 
     def export_decision_tree(self, decision_tree, export_filename_base):
+        logger.info(f"EXPORT: export_filename_base = '{export_filename_base}'")
+        logger.info(f"EXPORT: os.getcwd() = '{os.getcwd()}'")
+        
         tree = decision_tree.to_graphviz()
         tree_filename = export_filename_base + ".dot"
+        logger.info(f"EXPORT: tree_filename = '{tree_filename}'")
+        
         directory = os.path.dirname(tree_filename)
         if directory:
             os.makedirs(directory, exist_ok=True)
         with open(tree_filename, 'w') as file:
             file.write(tree.source)
+            file.flush()
+            os.fsync(file.fileno())
         logger.info(f"exported decision tree to {tree_filename}")
+        
+        # Debug: verify file exists and get absolute path
+        abs_tree_filename = os.path.abspath(tree_filename)
+        if os.path.exists(tree_filename):
+            logger.info(f"VERIFIED: {tree_filename} exists, size={os.path.getsize(tree_filename)} bytes")
+            logger.info(f"VERIFIED: absolute path is {abs_tree_filename}")
+        else:
+            logger.error(f"ERROR: {tree_filename} does NOT exist after write!")
 
         tree_visualization_filename = export_filename_base + ".png"
         tree.render(export_filename_base, format="png", cleanup=True) # using export_filename_base since graphviz appends .png by default
-        logger.info(f"exported decision tree visualization to {tree_visualization_filename}")
+        # Ensure PNG file is synced to disk
+        if os.path.exists(tree_visualization_filename):
+            with open(tree_visualization_filename, 'rb') as f:
+                os.fsync(f.fileno())
+            abs_tree_viz_filename = os.path.abspath(tree_visualization_filename)
+            logger.info(f"exported decision tree visualization to {tree_visualization_filename}")
+            logger.info(f"VERIFIED: {tree_visualization_filename} exists, size={os.path.getsize(tree_visualization_filename)} bytes")
+            logger.info(f"VERIFIED: absolute path is {abs_tree_viz_filename}")
+        else:
+            logger.error(f"ERROR: {tree_visualization_filename} does NOT exist after render!")
 
 
     def choose_tree_to_use(self, current_tree, paynt_tree, dtcontrol_trees, recomputed_scheduler_trees, values=[1,1,1], maximize=True):
@@ -556,6 +610,16 @@ class SynthesizerDecisionTree(paynt.synthesizer.synthesizer_ar.SynthesizerAR):
                 self.best_tree.root.associate_assignment(self.best_assignment)
                 self.best_tree_value = self.best_assignment_value
 
+                # Export tree immediately to ensure we have it even if process is killed
+                if self.export_synthesis_filename_base is not None:
+                    try:
+                        relevant_state_valuations = [self.quotient.relevant_state_valuations[state] for state in self.quotient.state_is_relevant_bv]
+                        self.best_tree.simplify(relevant_state_valuations)
+                        self.export_decision_tree(self.best_tree, self.export_synthesis_filename_base)
+                        logger.info(f"Immediately exported best tree (value={self.best_tree_value})")
+                    except Exception as e:
+                        logger.warning(f"Failed to immediately export tree: {e}")
+
                 if break_if_found or abs( (self.best_assignment_value-opt_result_value)/opt_result_value ) < 1e-3:
                     break
 
@@ -669,8 +733,45 @@ class SynthesizerDecisionTree(paynt.synthesizer.synthesizer_ar.SynthesizerAR):
             # logger.info(f"printing the PRISM module below:")
             # print(self.best_tree.to_prism())
 
+            # Always attempt an export at end, even if no improving tree was found.
             if self.export_synthesis_filename_base is not None:
-                self.export_decision_tree(self.best_tree, self.export_synthesis_filename_base)
+                try:
+                    if self.best_tree is None:
+                        # Build a trivial single-node tree that chooses a default action (first available)
+                        from paynt.utils import tree_helper as _th
+                        # Fallback: use quotient.decision_tree if it exists (partially constructed) else make minimal
+                        fallback = None
+                        if hasattr(self.quotient, 'decision_tree') and self.quotient.decision_tree is not None:
+                            fallback = self.quotient.decision_tree
+                        if fallback is None and hasattr(self.quotient, 'tree_helper_tree') and self.quotient.tree_helper_tree is not None:
+                            fallback = self.quotient.tree_helper_tree
+                        if fallback is None:
+                            logger.warning("No synthesized tree found; creating trivial placeholder tree for export.")
+                            class _DummyNode:
+                                def __init__(self):
+                                    self.children = []
+                                def to_graphviz(self):
+                                    import graphviz
+                                    g = graphviz.Digraph()
+                                    g.node("root", label="<no-tree>")
+                                    return g
+                                def simplify(self, *_args, **_kw):
+                                    return self
+                            class _DummyTree:
+                                def __init__(self):
+                                    self.root = _DummyNode()
+                                def to_graphviz(self):
+                                    return self.root.to_graphviz()
+                                def simplify(self, *_a, **_k):
+                                    return self
+                            fallback = _DummyTree()
+                        self.export_decision_tree(fallback, self.export_synthesis_filename_base)
+                        logger.info("Exported fallback decision tree (no improvements).")
+                    else:
+                        self.export_decision_tree(self.best_tree, self.export_synthesis_filename_base)
+                        logger.info("Exported final best decision tree.")
+                except Exception as e:
+                    logger.warning(f"Final tree export failed: {e}")
 
         time_total = round(paynt.utils.timer.GlobalTimer.read(),2)
         logger.info(f"synthesis finished after {time_total} seconds")

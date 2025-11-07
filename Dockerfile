@@ -6,11 +6,18 @@
 
 FROM randriu/paynt:cav25
 
+# Install pytest for testing
+RUN pip install pytest
+
 # ARG defines a build-time variable with a default value. It must be
 # declared after the final FROM to be available to later instructions like COPY.
-ARG SRC_FOLDER=synthesis
+ARG SRC_FOLDER=synthesis-modified
 
-# Copy the specified source folder and reinstall it
+# Copy BOTH synthesis directories for testing comparison
+COPY ./synthesis-modified /opt/synthesis-modified
+COPY ./synthesis-original /opt/synthesis-original
+
+# Install the specified source folder as the main installation
 COPY ./${SRC_FOLDER} /opt/paynt
 WORKDIR /opt/paynt
 RUN pip install .
@@ -24,8 +31,8 @@ RUN pip install .
 WORKDIR /opt/
 RUN git clone https://github.com/TheGreatfpmK/OMDT/
 
-RUN pip install matplotlib gym gurobipy pydot
-RUN apt-get update && apt-get install -y vim
+RUN pip install matplotlib gym gurobipy pydot graphviz
+RUN apt-get update && apt-get install -y vim graphviz
 
 RUN git clone https://github.com/randriu/dt-synthesis-cav-25.git cav25-experiments
 WORKDIR /opt/cav25-experiments
