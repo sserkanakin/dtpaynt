@@ -226,7 +226,7 @@ class SynthesizerAR(paynt.synthesizer.synthesizer.Synthesizer):
             if tree_size is None:
                 tree_size = 0
             try:
-                priority = float(value) - float(self.heuristic_alpha) * float(tree_size)
+                priority = float(self.heuristic_alpha) * float(value) + (1 - float(self.heuristic_alpha)) * float(tree_size)
             except (TypeError, ValueError):
                 priority = self._extract_value_for_analysis(analysis)
             return priority if priority is not None else 0.0
