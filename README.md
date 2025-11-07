@@ -175,4 +175,4 @@ Notes:
 
 ## Latest results
 
-- Final capped 10-way parallel run (depth 4): see `results/all_parallel_capped_20251106-221644/FINAL_REPORT.md` for the integrated report with all required plots and tables.
+- Final capped 10-way parallel run (depth 4): see `results/final_capped_run/FINAL_REPORT.md` for the integrated report with all required plots and tables.
