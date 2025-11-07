@@ -141,6 +141,8 @@ def setup_logger(log_path = None):
     help="decision tree synthesis: path to a scheduler to be mapped to a decision tree")
 @click.option("--add-dont-care-action", is_flag=True, default=False,
     help="decision tree synthesis: # if set, an explicit action executing a random choice of an available action will be added to each state")
+@click.option("--stop-on-first-improvement", is_flag=True, default=False,
+    help="Stop synthesis as soon as the first valid (non-trivial) tree is found.")
 
 @click.option("--dt-reduction", is_flag=True, default=False,
     help="this flag runs the DT reduction procedure from CAV Q4 section")
@@ -180,6 +182,7 @@ def paynt_run(
     export_synthesis,
     mdp_discard_unreachable_choices,
     tree_depth, tree_enumeration, tree_map_scheduler, add_dont_care_action,
+    stop_on_first_improvement,
     dt_reduction,
     constraint_bound,
     dt_setting,
@@ -257,6 +260,7 @@ def paynt_run(
     else:
         tree_helper_path = None
     quotient = paynt.parser.sketch.Sketch.load_sketch(sketch_path, properties_path, export, relative_error, precision, constraint_bound, tree_helper_path, exact)
+    setattr(quotient.specification, "stop_on_first_improvement", stop_on_first_improvement)
     synthesizer = paynt.synthesizer.synthesizer.Synthesizer.choose_synthesizer(quotient, method, fsc_synthesis, storm_control)
     if progress_log:
         interval = None if progress_interval is None or progress_interval <= 0 else float(progress_interval)

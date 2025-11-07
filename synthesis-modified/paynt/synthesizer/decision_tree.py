@@ -556,7 +556,7 @@ class SynthesizerDecisionTree(paynt.synthesizer.synthesizer_ar.SynthesizerAR):
         self.best_assignment = self.best_assignment_value = None
         self.counters_print()
 
-    def synthesize_tree_sequence(self, opt_result_value, overall_timeout=None, max_depth=None, break_if_found=False):
+    def synthesize_tree_sequence(self, opt_result_value, overall_timeout=None, max_depth=None, break_if_found=False, stop_on_first_improvement=False):
         self.best_tree = self.best_tree_value = None
 
         if max_depth is None:
@@ -619,6 +619,9 @@ class SynthesizerDecisionTree(paynt.synthesizer.synthesizer_ar.SynthesizerAR):
                         logger.info(f"Immediately exported best tree (value={self.best_tree_value})")
                     except Exception as e:
                         logger.warning(f"Failed to immediately export tree: {e}")
+
+                if stop_on_first_improvement:
+                    break_if_found = True
 
                 if break_if_found or abs( (self.best_assignment_value-opt_result_value)/opt_result_value ) < 1e-3:
                     break
@@ -698,7 +701,8 @@ class SynthesizerDecisionTree(paynt.synthesizer.synthesizer_ar.SynthesizerAR):
             elif not SynthesizerDecisionTree.tree_enumeration:
                 self.synthesize_tree(SynthesizerDecisionTree.tree_depth)
             else:
-                self.synthesize_tree_sequence(opt_result_value)
+                stop_on_first = getattr(self.quotient.specification, "stop_on_first_improvement", False)
+                self.synthesize_tree_sequence(opt_result_value, stop_on_first_improvement=stop_on_first)
 
         logger.info(f"the optimal scheduler has value: {opt_result_value}")
         if self.quotient.DONT_CARE_ACTION_LABEL in self.quotient.action_labels:
