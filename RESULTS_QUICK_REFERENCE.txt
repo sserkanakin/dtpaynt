@@ -1,0 +1,120 @@
+╔════════════════════════════════════════════════════════════════════════════════╗
+║                      RESULTS FOLDER STRUCTURE GUIDE                           ║
+╚════════════════════════════════════════════════════════════════════════════════╝
+
+LEVEL 1: ALGORITHM VARIANT
+─────────────────────────────────────────────────────────────────────────────────
+results/logs/
+  ├── original/                                    ← DFS-based (baseline)
+  │
+  ├── modified_value_only/                        ← Best-first (simple value)
+  │
+  ├── modified_bounds_gap/                        ← Best-first (bound-focused)
+  │
+  └── modified_value_size_alpha{...}/             ← Best-first (7 alphas)
+      ├── alpha0.01  (least penalize size)
+      ├── alpha0.1
+      ├── alpha0.25
+      ├── alpha0.5   (balanced)
+      ├── alpha0.75
+      ├── alpha0.9
+      └── alpha0.99  (most penalize size)
+
+         Priority = value - α·size
+         Higher α = prefer smaller trees
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+LEVEL 2: BENCHMARK NAME
+─────────────────────────────────────────────────────────────────────────────────
+results/logs/{ALGORITHM}/
+  └── consensus-4-2/                             ← Model: consensus-4-2
+      │
+      └── (Other benchmarks would go here)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+LEVEL 3: RUN ID (DEPTH ENCODED IN TIMESTAMP)
+─────────────────────────────────────────────────────────────────────────────────
+results/logs/{ALGORITHM}/consensus-4-2/
+  ├── consensus-4-2-20251107-135113/             ← Depth 4 (30 min timeout)
+  │   └── Run timestamp: 2025-11-07 13:51:13
+  │
+  ├── consensus-4-2-20251107-135114/             ← Depth 5 (60 min timeout)
+  │   └── Run timestamp: 2025-11-07 13:51:14
+  │
+  ├── consensus-4-2-20251107-135115/             ← Depth 6 (60 min timeout)
+  │   └── Run timestamp: 2025-11-07 13:51:15
+  │
+  └── consensus-4-2-20251107-135116/             ← Depth 7 (60 min timeout)
+      └── Run timestamp: 2025-11-07 13:51:16
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+LEVEL 4: OUTPUT FILES (PER RUN)
+─────────────────────────────────────────────────────────────────────────────────
+results/logs/{ALGORITHM}/consensus-4-2/{RUN_ID}/
+
+   ┌─ progress.csv                    ← ⭐ MAIN DATA FILE
+   │  Format: CSV with columns:
+   │    timestamp | best_value | tree_size | depth | families_evaluated | ...
+   │  
+   │  Example row:
+   │    1790.1, 0.038327, 31, 4, 237, ...
+   │    (after 1790.1s: found value 0.038327, tree size 31, eval'd 237 families)
+   │
+   ├─ run-info.json                   ← ⭐ RUN METADATA
+   │  Contains:
+   │    - Algorithm version
+   │    - Heuristic + alpha parameters
+   │    - Timeout duration
+   │    - Tree depth requested
+   │    - Full command line used
+   │
+   ├─ tree.png                        ← ⭐ DECISION TREE IMAGE
+   │  Visual representation of learned decision tree
+   │  Can be opened in any image viewer
+   │
+   ├─ tree.dot                        ← Decision tree (GraphViz format)
+   │  Can render: dot -Tpng tree.dot -o tree.png
+   │
+   ├─ stdout.txt                      ← Raw PAYNT output
+   │  Contains synthesis logs, progress updates, etc
+   │
+   └─ tree/                           ← Tree export files
+      └── (Additional tree data)
+
+╔════════════════════════════════════════════════════════════════════════════════╗
+║                            ANALYSIS OUTPUT                                    ║
+╚════════════════════════════════════════════════════════════════════════════════╝
+
+results/analysis/
+  ├── consensus-4-2_depth4/
+  │   ├── value_vs_time.png              ← All 10 algorithms on one plot
+  │   ├── tree_size_vs_time.png          ← How tree grows over time
+  │   └── families_evaluated_vs_time.png ← Efficiency comparison
+  │
+  ├── consensus-4-2_depth5/              ← Same 3 plots for depth 5
+  ├── consensus-4-2_depth6/              ← Same 3 plots for depth 6
+  └── consensus-4-2_depth7/              ← Same 3 plots for depth 7
+
+╔════════════════════════════════════════════════════════════════════════════════╗
+║                         QUICK NAVIGATION EXAMPLES                             ║
+╚════════════════════════════════════════════════════════════════════════════════╝
+
+View depth 4 convergence data for alpha=0.5:
+  cat results/logs/modified_value_size_alpha0.5/consensus-4-2/consensus-4-2-20251107-135113/progress.csv | tail -5
+
+View the decision tree for original algorithm at depth 5:
+  open results/logs/original/consensus-4-2/consensus-4-2-20251107-135114/tree.png
+
+View parameters for a specific run:
+  cat results/logs/modified_value_size_alpha0.75/consensus-4-2/consensus-4-2-20251107-135115/run-info.json | jq .
+
+Compare all alpha values for depth 6:
+  ls -la results/logs/modified_value_size_alpha*/consensus-4-2/consensus-4-2-20251107-135115/progress.csv
+
+Count completed runs:
+  find results/logs -name progress.csv -exec sh -c 'tail -1 "$1" | grep -q "^[0-9]*,[0-9]" && echo "$1"' _ {} \;
+
+═════════════════════════════════════════════════════════════════════════════════
