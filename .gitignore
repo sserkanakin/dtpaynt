@@ -151,6 +151,8 @@ Thumbs.db
 
 # Project specific
 results/
+test_mount/
+test_single_export.sh
 *.lic
 gurobi.lic
 
