@@ -766,9 +766,6 @@ class SynthesizerDecisionTree(paynt.synthesizer.synthesizer_ar.SynthesizerAR):
         logger.info(f"synthesis finished after {time_total} seconds")
 
         print()
-        if False: # TODO remove this
-            for name,time in self.quotient.coloring.getProfilingInfo():
-                time_percent = round(time/time_total*100,1)
-                print(f"{name} = {time} s ({time_percent} %)")
+        # Removed obsolete profiling block (previously under 'if False').
 
         return self.best_tree
