@@ -169,6 +169,49 @@ def plot_timeline_comparison(data: Dict[str, Dict[str, pd.DataFrame]],
     plt.close(fig)
 
 
+def plot_best_value_timelines(data: Dict[str, Dict[str, pd.DataFrame]],
+                               output_dir: Path) -> None:
+    """Plot Best Value (V_best) vs Time for all algorithms per benchmark."""
+    benchmarks = set()
+    for algo_data in data.values():
+        benchmarks.update(algo_data.keys())
+    if not benchmarks:
+        return
+
+    for benchmark in sorted(benchmarks):
+        fig, ax = plt.subplots(figsize=(10, 6))
+        found_any = False
+        for algo in sorted(data.keys()):
+            if benchmark not in data[algo]:
+                continue
+            df = data[algo][benchmark]
+            ts = pd.to_numeric(df['timestamp'], errors='coerce')
+            vals = pd.to_numeric(df['best_value'], errors='coerce')
+            valid_idx = ts.dropna().index.intersection(vals.dropna().index)
+            if valid_idx.empty:
+                continue
+            found_any = True
+            ts_aligned = ts.loc[valid_idx]
+            vals_aligned = vals.loc[valid_idx]
+            color = ALGO_COLORS.get(algo, None)
+            label = ALGO_LABELS.get(algo, algo)
+            ax.step(ts_aligned, vals_aligned, where='post', label=label,
+                    linewidth=2, alpha=0.9, color=color)
+
+        if not found_any:
+            plt.close(fig)
+            continue
+        ax.set_xlabel('Time (seconds)', fontsize=12)
+        ax.set_ylabel('Best Value (V_best)', fontsize=12)
+        ax.set_title(f'Anytime Performance: Best Value vs Time — {benchmark}', fontsize=14, fontweight='bold')
+        ax.legend(loc='best', fontsize=9)
+        ax.grid(True, alpha=0.3, linestyle='--')
+        plt.tight_layout()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_dir / f'timeline_{benchmark}_best_value.png', dpi=150, bbox_inches='tight')
+        plt.close(fig)
+
+
 def create_summary_table(data: Dict[str, Dict[str, pd.DataFrame]], output_dir: Path):
     """Create a comprehensive summary table with key metrics."""
     
@@ -311,6 +354,45 @@ def generate_scatter_plots(data: Dict[str, Dict[str, pd.DataFrame]], output_dir:
     print(f"  Created scatter plot: frontier vs time")
 
 
+def plot_value_vs_size_scatter(data: Dict[str, Dict[str, pd.DataFrame]], output_dir: Path) -> None:
+    """Scatter plot of Tree Size (X) vs Best Value (Y) across algorithms/benchmarks."""
+    records = []
+    for algo in data.keys():
+        for bench in data[algo].keys():
+            df = data[algo][bench]
+            best_value = pd.to_numeric(df['best_value'], errors='coerce').dropna()
+            tree_size = pd.to_numeric(df['tree_size'], errors='coerce').dropna()
+            if best_value.empty or tree_size.empty:
+                continue
+            records.append({
+                'algorithm': algo,
+                'benchmark': bench,
+                'best_value': float(best_value.iloc[-1]),
+                'tree_size': int(tree_size.iloc[-1]),
+            })
+
+    if not records:
+        return
+
+    dfp = pd.DataFrame(records)
+    fig, ax = plt.subplots(figsize=(10, 6))
+    for (bench, algo), group in dfp.groupby(['benchmark', 'algorithm']):
+        color = ALGO_COLORS.get(algo, None)
+        label = f"{ALGO_LABELS.get(algo, algo)} · {bench}"
+        ax.scatter(group['tree_size'], group['best_value'], s=120, alpha=0.85,
+                   edgecolors='black', color=color, label=label)
+
+    ax.set_xlabel('Tree Size (nodes) — lower is better', fontsize=12)
+    ax.set_ylabel('Best Value (V_best) — higher is better', fontsize=12)
+    ax.set_title('Value vs Size Trade-off (All benchmarks)', fontsize=14, fontweight='bold')
+    ax.grid(True, alpha=0.3, linestyle='--')
+    ax.legend(loc='best', fontsize=9)
+    plt.tight_layout()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_dir / 'scatter_tree_size_vs_value.png', dpi=150, bbox_inches='tight')
+    plt.close(fig)
+
+
 def create_comparison_matrix(data: Dict[str, Dict[str, pd.DataFrame]], output_dir: Path):
     """Create a comparison matrix showing which algorithm is best for each metric."""
     
@@ -441,6 +523,8 @@ def main():
     # Generate scatter plots
     print("Creating scatter plots...")
     generate_scatter_plots(data, args.output_dir)
+    # RQ2: Value vs Size (money plot)
+    plot_value_vs_size_scatter(data, args.output_dir)
     
     # Generate timeline plots for each benchmark
     print("Creating timeline plots...")
@@ -457,6 +541,9 @@ def main():
         for metric, ylabel in timeline_metrics:
             plot_timeline_comparison(data, args.output_dir, benchmark, metric, ylabel)
             print(f"  Created timeline for {benchmark} - {metric}")
+    # RQ1: Best value vs time timelines
+    plot_best_value_timelines(data, args.output_dir)
+    print("  Created best value (anytime) timelines")
     
     print(f"\n✅ All visualizations created in {args.output_dir}")
     return 0
